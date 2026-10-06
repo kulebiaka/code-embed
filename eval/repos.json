@@ -1,0 +1,23 @@
+[
+  {
+    "name": "requests",
+    "url": "https://github.com/psf/requests",
+    "commit": "611c6162cbc4ac2020a2f91c7cfa4f3abf9bbb60",
+    "languages": ["python"],
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "cobra",
+    "url": "https://github.com/spf13/cobra",
+    "commit": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+    "languages": ["go"],
+    "license": "Apache-2.0"
+  },
+  {
+    "name": "commander",
+    "url": "https://github.com/tj/commander.js",
+    "commit": "ba6d13ddb4243e5913367734f8c159089ffe7834",
+    "languages": ["javascript", "typescript"],
+    "license": "MIT"
+  }
+]
