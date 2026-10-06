@@ -1,0 +1,256 @@
+{
+  "version": 1,
+  "mirror": {
+    "githubRepo": "code-embed/code-embed",
+    "tag": "models-v1"
+  },
+  "models": [
+    {
+      "id": "qwen3-embedding-0.6b",
+      "hfRepo": "onnx-community/Qwen3-Embedding-0.6B-ONNX",
+      "revision": "c25a394dd583836952667c12f008335071b3f43d",
+      "files": [
+        {
+          "path": "onnx/model_quantized.onnx",
+          "sha256": "87cd124e0ef1fd1f223ebc283efccbaeac386d0b08344701c46975d0657b591f",
+          "size": 613527631
+        },
+        {
+          "path": "config.json",
+          "sha256": "66a10929782f3c9a3cd5dec90e2a95c60e05736134a63cd54479eeae80bed175",
+          "size": 1576
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
+          "size": 11423705
+        },
+        {
+          "path": "tokenizer_config.json",
+          "sha256": "977648852447cb6587327ff3205b0a84cf2fc9f05621d6c8e88a497caafab2e1",
+          "size": 9731
+        },
+        {
+          "path": "special_tokens_map.json",
+          "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd",
+          "size": 613
+        }
+      ],
+      "dims": 1024,
+      "mrlDims": [
+        1024,
+        768,
+        512,
+        256,
+        128
+      ],
+      "pooling": "last_token",
+      "queryInstruction": "Instruct: Given a question, retrieve code that answers it\nQuery: ",
+      "maxTokens": 8192,
+      "license": "Apache-2.0",
+      "sizeMb": 596,
+      "dtype": "q8"
+    },
+    {
+      "id": "embeddinggemma-300m",
+      "hfRepo": "onnx-community/embeddinggemma-300m-ONNX",
+      "revision": "5090578d9565bb06545b4552f76e6bc2c93e4a66",
+      "files": [
+        {
+          "path": "onnx/model_quantized.onnx",
+          "sha256": "172efde319fe1542dc41f31be6154910b05b78f7a861c265c4600eec906bd6d8",
+          "size": 567874
+        },
+        {
+          "path": "onnx/model_quantized.onnx_data",
+          "sha256": "705626e28e4c23c82ade34566b4197d97f534c12275fa406dfb71e9937d388c0",
+          "size": 308890624
+        },
+        {
+          "path": "config.json",
+          "sha256": "6e1f06404b7163e0325ed2ea3e6781cde50f4a50b31780a95ad0d30e8404d77b",
+          "size": 1765
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47",
+          "size": 20323312
+        },
+        {
+          "path": "tokenizer_config.json",
+          "sha256": "3ca953eea6c3c9fcda9cf3df22949ff18b216f7c74bd6459230f3f1013953f3a",
+          "size": 1156830
+        },
+        {
+          "path": "special_tokens_map.json",
+          "sha256": "2f7b0adf4fb469770bb1490e3e35df87b1dc578246c5e7e6fc76ecf33213a397",
+          "size": 662
+        }
+      ],
+      "dims": 768,
+      "mrlDims": [
+        768,
+        512,
+        256,
+        128
+      ],
+      "pooling": "mean",
+      "queryPrefix": "task: code retrieval | query: ",
+      "docPrefix": "title: none | text: ",
+      "maxTokens": 2048,
+      "license": "gemma",
+      "sizeMb": 316,
+      "dtype": "q8"
+    },
+    {
+      "id": "coderankembed-137m",
+      "hfRepo": "mrsladoje/CodeRankEmbed-onnx-int8",
+      "revision": "e74f446dc6e67e29fcee77213472c142f73a6bbb",
+      "files": [
+        {
+          "path": "onnx/model.onnx",
+          "sha256": "4eae31d09b1843103a1ebd5e2b2e24b5a5cad441a33906b35b12b1e2ed91d1db",
+          "size": 138619279
+        },
+        {
+          "path": "config.json",
+          "sha256": "d9cac600c987632c33d61a7ed7f7b3ff0a52e7eb41440b661266a9c88f75ebcd",
+          "size": 1371
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "91f1def9b9391fdabe028cd3f3fcc4efd34e5d1f08c3bf2de513ebb5911a1854",
+          "size": 711649
+        },
+        {
+          "path": "tokenizer_config.json",
+          "sha256": "8de9ab7560d7fb63338c00736faac7bb9d85d49da44c774c607e7766b59614ea",
+          "size": 1447
+        },
+        {
+          "path": "special_tokens_map.json",
+          "sha256": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a",
+          "size": 695
+        },
+        {
+          "path": "vocab.txt",
+          "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+          "size": 231508
+        }
+      ],
+      "dims": 768,
+      "pooling": "mean",
+      "queryPrefix": "Represent this query for searching relevant code: ",
+      "maxTokens": 8192,
+      "license": "MIT",
+      "sizeMb": 133,
+      "dtype": "q8"
+    },
+    {
+      "id": "multilingual-e5-small",
+      "hfRepo": "Xenova/multilingual-e5-small",
+      "revision": "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+      "files": [
+        {
+          "path": "onnx/model_quantized.onnx",
+          "sha256": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193",
+          "size": 118308185
+        },
+        {
+          "path": "config.json",
+          "sha256": "cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1",
+          "size": 658
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+          "size": 17082730
+        },
+        {
+          "path": "tokenizer_config.json",
+          "sha256": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b",
+          "size": 443
+        },
+        {
+          "path": "special_tokens_map.json",
+          "sha256": "d05497f1da52c5e09554c0cd874037a083e1dc1b9cfd48034d1c717f1afc07a7",
+          "size": 167
+        }
+      ],
+      "dims": 384,
+      "pooling": "mean",
+      "queryPrefix": "query: ",
+      "docPrefix": "passage: ",
+      "maxTokens": 512,
+      "license": "MIT",
+      "sizeMb": 129,
+      "dtype": "q8"
+    },
+    {
+      "id": "bge-m3",
+      "hfRepo": "onnx-community/bge-m3-ONNX",
+      "revision": "25b9af8e87a38eb120cfe87125383677b9cd309e",
+      "files": [
+        {
+          "path": "onnx/model_quantized.onnx",
+          "sha256": "2237f770aad5c71bbc1fc2d361a57f9a37400574cc9eff32626f0cdb49234730",
+          "size": 568479395
+        },
+        {
+          "path": "config.json",
+          "sha256": "70dae5884ced999af00244f776ac9eaa71538d68497d3d6a6091e0318cd32905",
+          "size": 658
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "249df0778f236f6ece390de0de746838ef25b9d6954b68c2ee71249e0a9d8fd4",
+          "size": 17082799
+        },
+        {
+          "path": "tokenizer_config.json",
+          "sha256": "b87c8703482b0300d3da30e201519aa641f6a450f5eb5bf1e624afbf70c74d80",
+          "size": 1203
+        },
+        {
+          "path": "special_tokens_map.json",
+          "sha256": "8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835",
+          "size": 964
+        }
+      ],
+      "dims": 1024,
+      "pooling": "cls",
+      "maxTokens": 8192,
+      "license": "MIT",
+      "sizeMb": 558,
+      "dtype": "q8"
+    },
+    {
+      "id": "potion-code-16m",
+      "hfRepo": "minishlab/potion-code-16M",
+      "revision": "1b0ff71095656b23306542bbad34a09109673720",
+      "files": [
+        {
+          "path": "model.safetensors",
+          "sha256": "ca6159081a6e96cebe4ad878e5e8437bfccc761e8db16223370149cd2faa6c0b",
+          "size": 64299272
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "8e84217af15e70e8127c855435fc3d8a4cd91d7bbe686f72e75f188118ec78ae",
+          "size": 1041917
+        },
+        {
+          "path": "config.json",
+          "sha256": "edf07552b5d768d556ded176d19f3a34f25360548de3a246d226ce8e28647914",
+          "size": 97
+        }
+      ],
+      "dims": 256,
+      "pooling": "static",
+      "maxTokens": 512,
+      "license": "MIT",
+      "sizeMb": 62,
+      "dtype": "fp32"
+    }
+  ]
+}
