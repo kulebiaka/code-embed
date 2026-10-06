@@ -197,7 +197,9 @@ describe("paths", () => {
 
   it("socketPath per platform", () => {
     const h = rootHash("/r");
-    expect(h).toMatch(/^[0-9a-f]{64}$/);
+    expect(h).toMatch(/^[0-9a-f]{16}$/);
+    expect(rootHash("/r")).toBe(h);
+    expect(rootHash("/r2")).not.toBe(h);
     vi.stubEnv("TMPDIR", "/tmpx");
     vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1");
     setPlatform("linux");
@@ -208,6 +210,16 @@ describe("paths", () => {
     expect(socketPath("/r")).toBe(`/tmpx/code-embed/${h}.sock`);
     setPlatform("win32");
     expect(socketPath("/r")).toBe(`\\\\.\\pipe\\code-embed-${h}`);
+  });
+
+  it("socketPath fits sun_path limits", () => {
+    const root = "/Users/someone/programming/very/long/project/path/name";
+    vi.stubEnv("TMPDIR", "/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/");
+    setPlatform("darwin");
+    expect(Buffer.byteLength(socketPath(root))).toBeLessThan(104);
+    vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1000000");
+    setPlatform("linux");
+    expect(Buffer.byteLength(socketPath(root))).toBeLessThan(108);
   });
 });
 

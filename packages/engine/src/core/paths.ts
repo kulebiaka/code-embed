@@ -20,7 +20,7 @@ export function embCachePath(): string {
 }
 
 export function rootHash(root: string): string {
-  return blake3Hex(root);
+  return blake3Hex(root).slice(0, 16);
 }
 
 export function socketPath(root: string): string {
