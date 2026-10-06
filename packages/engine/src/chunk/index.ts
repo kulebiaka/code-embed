@@ -1,13 +1,38 @@
-import type { Chunk, ChunkOptions } from "./types";
+import { existsSync } from "node:fs";
+import { log } from "../util/log";
+import { grammarPath } from "./assets";
+import { chunkWindows } from "./fallback";
+import { LANGUAGES } from "./languages";
+import { chunkMarkdown } from "./markdown";
+import { chunkWithTreeSitter, initTreeSitter } from "./treesitter";
+import { DEFAULT_CHUNK_OPTIONS, type Chunk, type ChunkOptions } from "./types";
 
 export function initChunker(): Promise<void> {
-  throw new Error("not implemented: chunk/index.initChunker");
+  return initTreeSitter();
 }
 
-export function chunkFile(_path: string, _lang: string | null, _content: string, _opts?: ChunkOptions): Promise<Chunk[]> {
-  throw new Error("not implemented: chunk/index.chunkFile");
+export async function chunkFile(
+  path: string,
+  lang: string | null,
+  content: string,
+  opts: ChunkOptions = DEFAULT_CHUNK_OPTIONS,
+): Promise<Chunk[]> {
+  if (lang === "markdown") return chunkMarkdown(content, opts);
+  if (lang && hasGrammar(lang)) {
+    try {
+      return await chunkWithTreeSitter(lang, content, opts);
+    } catch (e) {
+      log.warn(`tree-sitter failed for ${path}, falling back to windows: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return chunkWindows(content);
 }
 
-export function hasGrammar(_lang: string | null): boolean {
-  throw new Error("not implemented: chunk/index.hasGrammar");
+export function hasGrammar(lang: string | null): boolean {
+  if (!lang || !Object.hasOwn(LANGUAGES, lang)) return false;
+  try {
+    return existsSync(grammarPath(lang));
+  } catch {
+    return false;
+  }
 }
