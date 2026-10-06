@@ -1,2 +1,10 @@
 .orchestra/
 .claude/worktrees/
+node_modules/
+dist/
+!packages/engine/test/fixtures/sample-repo/dist/
+*.vsix
+.code-embed/
+eval/.repos/
+eval/reports/
+coverage/

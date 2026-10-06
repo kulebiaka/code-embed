@@ -1,0 +1,19 @@
+{
+  "name": "@code-embed/eval",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc -p . --noEmit",
+    "eval": "tsx src/run.ts",
+    "bench": "tsx src/bench.ts",
+    "stage0": "tsx stage0/check-runtime.ts",
+    "validate-dataset": "tsx scripts/validate-dataset.ts",
+    "fetch-repos": "tsx scripts/fetch-repos.ts"
+  },
+  "dependencies": {
+    "@code-embed/protocol": "workspace:*",
+    "code-embed": "workspace:*"
+  }
+}
