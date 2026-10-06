@@ -98,7 +98,7 @@ describe("local embedder", () => {
   });
 
   it("last_token pooling handles left and right padding", async () => {
-    state.output = { last_hidden_state: { data: [1, 0, 0, 2, 5, 5, 0, 3, 0, 4, 9, 9], dims: [2, 3, 2] } };
+    state.output = { last_hidden_state: { data: [1, 0, 0, 2, 5, 5, 9, 9, 0, 3, 0, 4], dims: [2, 3, 2] } };
     state.mask = { data: [1, 1, 0, 0, 1, 1], dims: [2, 3] };
     const emb = createLocalEmbedder({ ...getModel("qwen3-embedding-0.6b"), dims: 2, mrlDims: undefined }, opts);
     const [a, b] = await emb.embedDocuments(["x", "y"]);
