@@ -1,0 +1,67 @@
+{"id":"requests-001","repo":"requests","query":"where are redirects followed and the redirect chain built","lang":"en","expected":[{"path":"src/requests/sessions.py","startLine":186,"endLine":307}]}
+{"id":"requests-002","repo":"requests","query":"где определяется, что при редиректе на другой хост нужно сбросить заголовок Authorization","lang":"ru","expected":[{"path":"src/requests/sessions.py","startLine":154,"endLine":184}]}
+{"id":"requests-003","repo":"requests","query":"how does a Session merge its default settings with per-request settings","lang":"en","expected":[{"path":"src/requests/sessions.py","startLine":76,"endLine":105}]}
+{"id":"requests-004","repo":"requests","query":"как объединяются хуки сессии и хуки конкретного запроса","lang":"ru","expected":[{"path":"src/requests/sessions.py","startLine":108,"endLine":124}]}
+{"id":"requests-005","repo":"requests","query":"pick the transport adapter matching a URL prefix","lang":"en","expected":[{"path":"src/requests/sessions.py","startLine":870,"endLine":881}]}
+{"id":"requests-006","repo":"requests","query":"регистрация собственного адаптера транспорта для префикса URL","lang":"ru","expected":[{"path":"src/requests/sessions.py","startLine":888,"endLine":897}]}
+{"id":"requests-007","repo":"requests","query":"send a prepared request and handle redirects and cookies afterwards","lang":"en","expected":[{"path":"src/requests/sessions.py","startLine":752,"endLine":829}]}
+{"id":"requests-008","repo":"requests","query":"где собираются переменные окружения прокси и параметры verify/cert для запроса","lang":"ru","expected":[{"path":"src/requests/sessions.py","startLine":831,"endLine":868}]}
+{"id":"requests-009","repo":"requests","query":"build a PreparedRequest from a Request using the session's cookies, auth and headers","lang":"en","expected":[{"path":"src/requests/sessions.py","startLine":511,"endLine":555}]}
+{"id":"requests-010","repo":"requests","query":"метод Session.request: создание Request, подготовка и отправка","lang":"ru","expected":[{"path":"src/requests/sessions.py","startLine":557,"endLine":653}]}
+{"id":"requests-011","repo":"requests","query":"change the HTTP method when the server answers 303 or 302","lang":"en","expected":[{"path":"src/requests/sessions.py","startLine":370,"endLine":392}]}
+{"id":"requests-012","repo":"requests","query":"пересчёт прокси при перенаправлении на другой адрес","lang":"ru","expected":[{"path":"src/requests/sessions.py","startLine":334,"endLine":368}]}
+{"id":"requests-013","repo":"requests","query":"restore Authorization from .netrc after a redirect","lang":"en","expected":[{"path":"src/requests/sessions.py","startLine":309,"endLine":332}]}
+{"id":"requests-014","repo":"requests","query":"top-level helper that issues a single HTTP request without creating a session explicitly","lang":"en","expected":[{"path":"src/requests/api.py","startLine":24,"endLine":71}]}
+{"id":"requests-015","repo":"requests","query":"функция-обёртка для быстрой отправки POST-запроса с данными формы или JSON","lang":"ru","expected":[{"path":"src/requests/api.py","startLine":117,"endLine":134}]}
+{"id":"requests-016","repo":"requests","query":"build the query string and form body from a dict or list of tuples","lang":"en","expected":[{"path":"src/requests/models.py","startLine":142,"endLine":180}],"tags":["identifier"]}
+{"id":"requests-017","repo":"requests","query":"кодирование multipart-файлов для отправки в теле запроса","lang":"ru","expected":[{"path":"src/requests/models.py","startLine":183,"endLine":251}]}
+{"id":"requests-018","repo":"requests","query":"where does the library choose the request body, content type, and content length","lang":"en","expected":[{"path":"src/requests/models.py","startLine":576,"endLine":652}]}
+{"id":"requests-019","repo":"requests","query":"разбор URL: проверка схемы, IDNA-кодирование хоста и добавление параметров запроса","lang":"ru","expected":[{"path":"src/requests/models.py","startLine":483,"endLine":563}]}
+{"id":"requests-020","repo":"requests","query":"set Content-Length header based on the body type","lang":"en","expected":[{"path":"src/requests/models.py","startLine":654,"endLine":668}]}
+{"id":"requests-021","repo":"requests","query":"как к подготовленному запросу добавляется заголовок Cookie из jar","lang":"ru","expected":[{"path":"src/requests/models.py","startLine":699,"endLine":720}]}
+{"id":"requests-022","repo":"requests","query":"raise an exception when the response status is 4xx or 5xx","lang":"en","expected":[{"path":"src/requests/models.py","startLine":1144,"endLine":1171}]}
+{"id":"requests-023","repo":"requests","query":"декодирование тела ответа в JSON с автоопределением кодировки","lang":"ru","expected":[{"path":"src/requests/models.py","startLine":1091,"endLine":1124}]}
+{"id":"requests-024","repo":"requests","query":"stream the response content in chunks of a given size","lang":"en","expected":[{"path":"src/requests/models.py","startLine":907,"endLine":977}]}
+{"id":"requests-025","repo":"requests","query":"построчное чтение потокового ответа с разделителем строк","lang":"ru","expected":[{"path":"src/requests/models.py","startLine":980,"endLine":1032}]}
+{"id":"requests-026","repo":"requests","query":"guess the response text encoding when the server did not declare one","lang":"en","expected":[{"path":"src/requests/models.py","startLine":897,"endLine":904}]}
+{"id":"requests-027","repo":"requests","query":"свойство, которое говорит, что код ответа меньше 400","lang":"ru","expected":[{"path":"src/requests/models.py","startLine":862,"endLine":874}]}
+{"id":"requests-028","repo":"requests","query":"parse the Link header of a response into a dictionary","lang":"en","expected":[{"path":"src/requests/models.py","startLine":1127,"endLine":1142}]}
+{"id":"requests-029","repo":"requests","query":"где проверяется, что ответ является постоянным редиректом","lang":"ru","expected":[{"path":"src/requests/models.py","startLine":884,"endLine":889}]}
+{"id":"requests-030","repo":"requests","query":"register a callback to run on a request event","lang":"en","expected":[{"path":"src/requests/models.py","startLine":257,"endLine":270}]}
+{"id":"requests-031","repo":"requests","query":"dispatch registered hooks for an event on response","lang":"en","expected":[{"path":"src/requests/hooks.py","startLine":32,"endLine":48}]}
+{"id":"requests-032","repo":"requests","query":"базовая аутентификация: формирование строки Basic из логина и пароля","lang":"ru","expected":[{"path":"src/requests/auth.py","startLine":34,"endLine":75}]}
+{"id":"requests-033","repo":"requests","query":"compute the Digest authentication header with nonce counter and cnonce","lang":"en","expected":[{"path":"src/requests/auth.py","startLine":157,"endLine":266}]}
+{"id":"requests-034","repo":"requests","query":"обработка ответа 401 для Digest-аутентификации и повторная отправка запроса","lang":"ru","expected":[{"path":"src/requests/auth.py","startLine":273,"endLine":319}]}
+{"id":"requests-035","repo":"requests","query":"аутентификация на прокси-сервере через заголовок Proxy-Authorization","lang":"ru","expected":[{"path":"src/requests/auth.py","startLine":116,"endLine":121}]}
+{"id":"requests-036","repo":"requests","query":"dictionary that ignores key case, used for HTTP headers","lang":"en","expected":[{"path":"src/requests/structures.py","startLine":20,"endLine":93}]}
+{"id":"requests-037","repo":"requests","query":"словарь для поиска кодов состояния, доступный через атрибуты","lang":"ru","expected":[{"path":"src/requests/structures.py","startLine":96,"endLine":130}]}
+{"id":"requests-038","repo":"requests","query":"cookie jar that supports dict-style access","lang":"en","expected":[{"path":"src/requests/cookies.py","startLine":191,"endLine":476}]}
+{"id":"requests-039","repo":"requests","query":"создание объекта Cookie из пары имя-значение с параметрами по умолчанию","lang":"ru","expected":[{"path":"src/requests/cookies.py","startLine":494,"endLine":528}]}
+{"id":"requests-040","repo":"requests","query":"merge a dict of cookies into an existing jar","lang":"en","expected":[{"path":"src/requests/cookies.py","startLine":604,"endLine":625}]}
+{"id":"requests-041","repo":"requests","query":"выбросить ошибку, если в jar найдено несколько cookie с одним именем и разными доменами","lang":"ru","expected":[{"path":"src/requests/cookies.py","startLine":185,"endLine":188}]}
+{"id":"requests-042","repo":"requests","query":"convert a Morsel into a cookielib cookie","lang":"en","expected":[{"path":"src/requests/cookies.py","startLine":531,"endLine":557}]}
+{"id":"requests-043","repo":"requests","query":"HTTPAdapter default implementation of sending a request through urllib3","lang":"en","expected":[{"path":"src/requests/adapters.py","startLine":634,"endLine":748}]}
+{"id":"requests-044","repo":"requests","query":"настройка проверки TLS-сертификата и клиентского сертификата для соединения","lang":"ru","expected":[{"path":"src/requests/adapters.py","startLine":307,"endLine":363}]}
+{"id":"requests-045","repo":"requests","query":"initialise the urllib3 pool manager with pool size and retries","lang":"en","expected":[{"path":"src/requests/adapters.py","startLine":239,"endLine":267}]}
+{"id":"requests-046","repo":"requests","query":"превращение ответа urllib3 в объект Response","lang":"ru","expected":[{"path":"src/requests/adapters.py","startLine":365,"endLine":401}]}
+{"id":"requests-047","repo":"requests","query":"retrieve or create a connection pool for a URL, taking proxies into account","lang":"en","expected":[{"path":"src/requests/adapters.py","startLine":455,"endLine":510}]}
+{"id":"requests-048","repo":"requests","query":"формирование URL запроса для отправки через прокси","lang":"ru","expected":[{"path":"src/requests/adapters.py","startLine":565,"endLine":597}]}
+{"id":"requests-049","repo":"requests","query":"exception raised when a request times out while connecting","lang":"en","expected":[{"path":"src/requests/exceptions.py","startLine":91,"endLine":95}]}
+{"id":"requests-050","repo":"requests","query":"исключение при слишком большом числе перенаправлений","lang":"ru","expected":[{"path":"src/requests/exceptions.py","startLine":106,"endLine":107}]}
+{"id":"requests-051","repo":"requests","query":"base class of all exceptions in requests","lang":"en","expected":[{"path":"src/requests/exceptions.py","startLine":20,"endLine":35}]}
+{"id":"requests-052","repo":"requests","query":"decide whether a request to this host should bypass the proxy using no_proxy","lang":"en","expected":[{"path":"src/requests/utils.py","startLine":810,"endLine":870}]}
+{"id":"requests-053","repo":"requests","query":"выбор прокси для URL по схеме и хосту","lang":"ru","expected":[{"path":"src/requests/utils.py","startLine":885,"endLine":908}]}
+{"id":"requests-054","repo":"requests","query":"get_netrc_auth lookup credentials in the user's netrc file","lang":"en","expected":[{"path":"src/requests/utils.py","startLine":231,"endLine":280}],"tags":["identifier"]}
+{"id":"requests-055","repo":"requests","query":"определение размера тела запроса: файлы, потоки, строки","lang":"ru","expected":[{"path":"src/requests/utils.py","startLine":160,"endLine":228}]}
+{"id":"requests-056","repo":"requests","query":"parse a header like Link: <url>; rel=next into a list","lang":"en","expected":[{"path":"src/requests/utils.py","startLine":965,"endLine":999}]}
+{"id":"requests-057","repo":"requests","query":"экранирование небезопасных символов в URI с сохранением зарезервированных","lang":"ru","expected":[{"path":"src/requests/utils.py","startLine":704,"endLine":723}]}
+{"id":"requests-058","repo":"requests","query":"extract username and password from a URL","lang":"en","expected":[{"path":"src/requests/utils.py","startLine":1070,"endLine":1084}]}
+{"id":"requests-059","repo":"requests","query":"проверка корректности имени и значения заголовка на запрещённые символы","lang":"ru","expected":[{"path":"src/requests/utils.py","startLine":1087,"endLine":1095}]}
+{"id":"requests-060","repo":"requests","query":"string for the default User-Agent header","lang":"en","expected":[{"path":"src/requests/utils.py","startLine":942,"endLine":948}]}
+{"id":"requests-061","repo":"requests","query":"угадать кодировку JSON по первым байтам данных","lang":"ru","expected":[{"path":"src/requests/utils.py","startLine":1008,"endLine":1037}]}
+{"id":"requests-062","repo":"requests","query":"rewind a file-like request body before resending it after a redirect","lang":"en","expected":[{"path":"src/requests/utils.py","startLine":1139,"endLine":1155}]}
+{"id":"requests-063","repo":"requests","query":"добавить схему к URL, если она не указана","lang":"ru","expected":[{"path":"src/requests/utils.py","startLine":1040,"endLine":1067}]}
+{"id":"requests-064","repo":"requests","query":"print system and library versions for bug reports","lang":"en","expected":[{"path":"src/requests/help.py","startLine":67,"endLine":123}]}
+{"id":"requests-065","repo":"requests","query":"преобразование bytes и str в нативную строку","lang":"ru","expected":[{"path":"src/requests/_internal_utils.py","startLine":26,"endLine":36}]}
+{"id":"requests-066","repo":"requests","query":"check whether an IP address belongs to a CIDR network","lang":"en","expected":[{"path":"src/requests/utils.py","startLine":726,"endLine":738}]}
+{"id":"requests-067","repo":"requests","query":"закрытие всех адаптеров транспорта при завершении сессии","lang":"ru","expected":[{"path":"src/requests/sessions.py","startLine":883,"endLine":886}]}

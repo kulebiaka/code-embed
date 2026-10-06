@@ -1,0 +1,75 @@
+{"id":"commander-001","repo":"commander","query":"where are the command line arguments split into options and operands","lang":"en","expected":[{"path":"lib/command.js","startLine":1760,"endLine":1907}]}
+{"id":"commander-002","repo":"commander","query":"разбор argv: определение пользовательских аргументов для node, electron и обычного запуска","lang":"ru","expected":[{"path":"lib/command.js","startLine":992,"endLine":1056}]}
+{"id":"commander-003","repo":"commander","query":"parse process.argv synchronously","lang":"en","expected":[{"path":"lib/command.js","startLine":1081,"endLine":1087}]}
+{"id":"commander-004","repo":"commander","query":"асинхронный разбор аргументов, когда обработчики действий возвращают промисы","lang":"ru","expected":[{"path":"lib/command.js","startLine":1110,"endLine":1116}]}
+{"id":"commander-005","repo":"commander","query":"define a subcommand and optionally attach an action handler","lang":"en","expected":[{"path":"lib/command.js","startLine":156,"endLine":181}]}
+{"id":"commander-006","repo":"commander","query":"добавление уже созданного объекта команды как подкоманды","lang":"ru","expected":[{"path":"lib/command.js","startLine":289,"endLine":304}]}
+{"id":"commander-007","repo":"commander","query":"set the callback that runs when the command is invoked","lang":"en","expected":[{"path":"lib/command.js","startLine":557,"endLine":573}]}
+{"id":"commander-008","repo":"commander","query":"объявление опции с флагами, описанием и значением по умолчанию","lang":"ru","expected":[{"path":"lib/command.js","startLine":779,"endLine":781}]}
+{"id":"commander-009","repo":"commander","query":"declare an option that must be specified","lang":"en","expected":[{"path":"lib/command.js","startLine":796,"endLine":804}]}
+{"id":"commander-010","repo":"commander","query":"регистрация объекта Option в команде и вычисление значения по умолчанию","lang":"ru","expected":[{"path":"lib/command.js","startLine":671,"endLine":724}]}
+{"id":"commander-011","repo":"commander","query":"internal logic that stores option value and handles negated or variadic options","lang":"en","expected":[{"path":"lib/command.js","startLine":732,"endLine":755}]}
+{"id":"commander-012","repo":"commander","query":"обработка ошибки: вывод сообщения и выход с кодом","lang":"ru","expected":[{"path":"lib/command.js","startLine":1952,"endLine":1970}]}
+{"id":"commander-013","repo":"commander","query":"override process.exit so errors throw instead","lang":"en","expected":[{"path":"lib/command.js","startLine":509,"endLine":522}]}
+{"id":"commander-014","repo":"commander","query":"метод, который завершает процесс или бросает CommanderError","lang":"ru","expected":[{"path":"lib/command.js","startLine":534,"endLine":540}]}
+{"id":"commander-015","repo":"commander","query":"show the help text and exit","lang":"en","expected":[{"path":"lib/command.js","startLine":2635,"endLine":2648}]}
+{"id":"commander-016","repo":"commander","query":"формирование текста справки без вывода","lang":"ru","expected":[{"path":"lib/command.js","startLine":2464,"endLine":2475}]}
+{"id":"commander-017","repo":"commander","query":"add custom text before or after the built-in help","lang":"en","expected":[{"path":"lib/command.js","startLine":2670,"endLine":2691}]}
+{"id":"commander-018","repo":"commander","query":"настройка внешнего вида справки через конфигурацию Help","lang":"ru","expected":[{"path":"lib/command.js","startLine":216,"endLine":221}]}
+{"id":"commander-019","repo":"commander","query":"configure how output and errors are written","lang":"en","expected":[{"path":"lib/command.js","startLine":246,"endLine":254}]}
+{"id":"commander-020","repo":"commander","query":"показывать справку после ошибки разбора","lang":"ru","expected":[{"path":"lib/command.js","startLine":262,"endLine":266}]}
+{"id":"commander-021","repo":"commander","query":"suggest similar commands or options on unknown input","lang":"en","expected":[{"path":"lib/command.js","startLine":274,"endLine":277}]}
+{"id":"commander-022","repo":"commander","query":"сообщение об неизвестной опции с подсказкой похожей","lang":"ru","expected":[{"path":"lib/command.js","startLine":2126,"endLine":2149}]}
+{"id":"commander-023","repo":"commander","query":"error when a command is invoked with too many positional arguments","lang":"en","expected":[{"path":"lib/command.js","startLine":2158,"endLine":2168}]}
+{"id":"commander-024","repo":"commander","query":"ошибка о пропущенном обязательном аргументе команды","lang":"ru","expected":[{"path":"lib/command.js","startLine":2046,"endLine":2049}]}
+{"id":"commander-025","repo":"commander","query":"run lifecycle hooks preAction and postAction","lang":"en","expected":[{"path":"lib/command.js","startLine":488,"endLine":500}]}
+{"id":"commander-026","repo":"commander","query":"цепочка вызова хуков и промисов вокруг обработчика действия","lang":"ru","expected":[{"path":"lib/command.js","startLine":1511,"endLine":1532}]}
+{"id":"commander-027","repo":"commander","query":"run a stand-alone executable subcommand as a child process","lang":"en","expected":[{"path":"lib/command.js","startLine":1215,"endLine":1358}]}
+{"id":"commander-028","repo":"commander","query":"ошибка, если файл исполняемой подкоманды не найден рядом со скриптом","lang":"ru","expected":[{"path":"lib/command.js","startLine":1196,"endLine":1207}]}
+{"id":"commander-029","repo":"commander","query":"dispatch to the right subcommand and pass remaining arguments","lang":"en","expected":[{"path":"lib/command.js","startLine":1364,"endLine":1383}]}
+{"id":"commander-030","repo":"commander","query":"главная внутренняя функция разбора команды: операнды, неизвестные опции, вызов действия","lang":"ru","expected":[{"path":"lib/command.js","startLine":1562,"endLine":1653}]}
+{"id":"commander-031","repo":"commander","query":"validate that mandatory options have values","lang":"en","expected":[{"path":"lib/command.js","startLine":1687,"endLine":1699}]}
+{"id":"commander-032","repo":"commander","query":"проверка конфликтующих опций, которые нельзя использовать вместе","lang":"ru","expected":[{"path":"lib/command.js","startLine":1735,"endLine":1740}]}
+{"id":"commander-033","repo":"commander","query":"apply environment variables to options","lang":"en","expected":[{"path":"lib/command.js","startLine":1978,"endLine":2001}]}
+{"id":"commander-034","repo":"commander","query":"применение подразумеваемых значений опций, заданных через implies","lang":"ru","expected":[{"path":"lib/command.js","startLine":2008,"endLine":2037}]}
+{"id":"commander-035","repo":"commander","query":"get option values from the command and its ancestors","lang":"en","expected":[{"path":"lib/command.js","startLine":1936,"endLine":1942}]}
+{"id":"commander-036","repo":"commander","query":"где определяется источник значения опции: default, env, cli","lang":"ru","expected":[{"path":"lib/command.js","startLine":962,"endLine":964}]}
+{"id":"commander-037","repo":"commander","query":"set the program version and the flag to display it","lang":"en","expected":[{"path":"lib/command.js","startLine":2209,"endLine":2223}]}
+{"id":"commander-038","repo":"commander","query":"задание описания и краткого описания команды","lang":"ru","expected":[{"path":"lib/command.js","startLine":2232,"endLine":2240}]}
+{"id":"commander-039","repo":"commander","query":"define aliases for a command","lang":"en","expected":[{"path":"lib/command.js","startLine":2263,"endLine":2292}]}
+{"id":"commander-040","repo":"commander","query":"настройка строки использования usage","lang":"ru","expected":[{"path":"lib/command.js","startLine":2318,"endLine":2336}]}
+{"id":"commander-041","repo":"commander","query":"how are groups of options shown under custom headings in help","lang":"en","expected":[{"path":"lib/command.js","startLine":2396,"endLine":2400}]}
+{"id":"commander-042","repo":"commander","query":"разрешить неизвестные опции без ошибки","lang":"ru","expected":[{"path":"lib/command.js","startLine":828,"endLine":831}]}
+{"id":"commander-043","repo":"commander","query":"pass options after a subcommand through to the program","lang":"en","expected":[{"path":"lib/command.js","startLine":866,"endLine":870}]}
+{"id":"commander-044","repo":"commander","query":"включение позиционных опций, чтобы опции программы идут перед подкомандой","lang":"ru","expected":[{"path":"lib/command.js","startLine":852,"endLine":855}]}
+{"id":"commander-045","repo":"commander","query":"restore command state so parse can be called multiple times","lang":"en","expected":[{"path":"lib/command.js","startLine":1171,"endLine":1187}]}
+{"id":"commander-046","repo":"commander","query":"сохранение состояния перед разбором, чтобы повторный parse был чистым","lang":"ru","expected":[{"path":"lib/command.js","startLine":1154,"endLine":1163}]}
+{"id":"commander-047","repo":"commander","query":"the Option class constructor that splits flags like -p, --port <number>","lang":"en","expected":[{"path":"lib/option.js","startLine":11,"endLine":37}]}
+{"id":"commander-048","repo":"commander","query":"ограничение значений опции списком допустимых вариантов","lang":"ru","expected":[{"path":"lib/option.js","startLine":181,"endLine":195}]}
+{"id":"commander-049","repo":"commander","query":"ключ опции в camelCase для хранения значения","lang":"ru","expected":[{"path":"lib/option.js","startLine":217,"endLine":222}]}
+{"id":"commander-050","repo":"commander","query":"mark an option as hidden from help","lang":"en","expected":[{"path":"lib/option.js","startLine":156,"endLine":159}]}
+{"id":"commander-051","repo":"commander","query":"make options conflict with each other","lang":"en","expected":[{"path":"lib/option.js","startLine":82,"endLine":85}]}
+{"id":"commander-052","repo":"commander","query":"связать опцию с переменной окружения","lang":"ru","expected":[{"path":"lib/option.js","startLine":120,"endLine":123}]}
+{"id":"commander-053","repo":"commander","query":"function that splits the flags string into short and long names","lang":"en","expected":[{"path":"lib/option.js","startLine":328,"endLine":377}]}
+{"id":"commander-054","repo":"commander","query":"преобразование строки с дефисами в camelCase","lang":"ru","expected":[{"path":"lib/option.js","startLine":316,"endLine":320}]}
+{"id":"commander-055","repo":"commander","query":"restrict an argument to a list of allowed values","lang":"en","expected":[{"path":"lib/argument.js","startLine":98,"endLine":112}]}
+{"id":"commander-056","repo":"commander","query":"обязательный или необязательный позиционный аргумент: квадратные и угловые скобки","lang":"ru","expected":[{"path":"lib/argument.js","startLine":143,"endLine":147}]}
+{"id":"commander-057","repo":"commander","query":"which options and subcommands are shown in help, taking hidden into account","lang":"en","expected":[{"path":"lib/help.js","startLine":80,"endLine":104}]}
+{"id":"commander-058","repo":"commander","query":"формирование полного текста справки: usage, описание, аргументы, опции, команды","lang":"ru","expected":[{"path":"lib/help.js","startLine":444,"endLine":528}]}
+{"id":"commander-059","repo":"commander","query":"wrap long help text to the terminal width","lang":"en","expected":[{"path":"lib/help.js","startLine":696,"endLine":730}]}
+{"id":"commander-060","repo":"commander","query":"вычисление ширины колонки с терминами в справке","lang":"ru","expected":[{"path":"lib/help.js","startLine":619,"endLine":626}]}
+{"id":"commander-061","repo":"commander","query":"compute the usage line of a command","lang":"en","expected":[{"path":"lib/help.js","startLine":277,"endLine":292}]}
+{"id":"commander-062","repo":"commander","query":"описание опции: значения по умолчанию, допустимые значения, env","lang":"ru","expected":[{"path":"lib/help.js","startLine":326,"endLine":364}]}
+{"id":"commander-063","repo":"commander","query":"edit distance between two strings","lang":"en","expected":[{"path":"lib/suggestSimilar.js","startLine":3,"endLine":46}]}
+{"id":"commander-064","repo":"commander","query":"поиск наиболее похожих слов для подсказки при опечатке","lang":"ru","expected":[{"path":"lib/suggestSimilar.js","startLine":56,"endLine":99}]}
+{"id":"commander-065","repo":"commander","query":"error class carrying exitCode and code","lang":"en","expected":[{"path":"lib/error.js","startLine":4,"endLine":20}]}
+{"id":"commander-066","repo":"commander","query":"ошибка при неверном значении аргумента, пользовательская функция парсинга может её выбросить","lang":"ru","expected":[{"path":"lib/error.js","startLine":25,"endLine":36}]}
+{"id":"commander-067","repo":"commander","query":"set an inspect port for node subcommands to avoid port collisions","lang":"en","expected":[{"path":"lib/command.js","startLine":2719,"endLine":2760}]}
+{"id":"commander-068","repo":"commander","query":"TypeScript declaration of the Command class","lang":"en","expected":[{"path":"typings/index.d.ts","startLine":376,"endLine":1092}]}
+{"id":"commander-069","repo":"commander","query":"типы для Option в TypeScript","lang":"ru","expected":[{"path":"typings/index.d.ts","startLine":95,"endLine":208}]}
+{"id":"commander-070","repo":"commander","query":"readme section on declaring options with default values","lang":"en","expected":[{"path":"Readme.md","startLine":253,"endLine":273}]}
+{"id":"commander-071","repo":"commander","query":"в документации описано, как сделать вариадичную опцию","lang":"ru","expected":[{"path":"Readme.md","startLine":358,"endLine":390}]}
+{"id":"commander-072","repo":"commander","query":"readme: custom option processing with parse functions","lang":"en","expected":[{"path":"Readme.md","startLine":455,"endLine":517}]}
+{"id":"commander-073","repo":"commander","query":"документация: хуки жизненного цикла команды","lang":"ru","expected":[{"path":"Readme.md","startLine":721,"endLine":748}]}
+{"id":"commander-074","repo":"commander","query":"как запускаются отдельные исполняемые подкоманды, описано в Readme","lang":"ru","expected":[{"path":"Readme.md","startLine":696,"endLine":719}]}
+{"id":"commander-075","repo":"commander","query":"quick start example for a program with options","lang":"en","expected":[{"path":"Readme.md","startLine":67,"endLine":145}]}

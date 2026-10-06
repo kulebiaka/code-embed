@@ -1,0 +1,74 @@
+{"id":"cobra-001","repo":"cobra","query":"where is the command line parsed and the target subcommand found","lang":"en","expected":[{"path":"command.go","startLine":757,"endLine":779}]}
+{"id":"cobra-002","repo":"cobra","query":"как определяется, какую именно подкоманду вызвал пользователь по аргументам командной строки","lang":"ru","expected":[{"path":"command.go","startLine":757,"endLine":779}]}
+{"id":"cobra-003","repo":"cobra","query":"main entry point that executes the root command","lang":"en","expected":[{"path":"command.go","startLine":1084,"endLine":1170}]}
+{"id":"cobra-004","repo":"cobra","query":"выполнение команды: вызов PreRun, Run и PostRun хуков","lang":"ru","expected":[{"path":"command.go","startLine":905,"endLine":1045}]}
+{"id":"cobra-005","repo":"cobra","query":"suggest similar command names when the user mistypes","lang":"en","expected":[{"path":"command.go","startLine":863,"endLine":881}]}
+{"id":"cobra-006","repo":"cobra","query":"подсказки похожих команд при опечатке в имени","lang":"ru","expected":[{"path":"command.go","startLine":781,"endLine":796}]}
+{"id":"cobra-007","repo":"cobra","query":"walk through arguments while allowing flags to be interleaved with subcommands","lang":"en","expected":[{"path":"command.go","startLine":821,"endLine":860}]}
+{"id":"cobra-008","repo":"cobra","query":"удаление флагов из списка аргументов, чтобы остались только позиционные","lang":"ru","expected":[{"path":"command.go","startLine":674,"endLine":710}]}
+{"id":"cobra-009","repo":"cobra","query":"add child commands to a parent command","lang":"en","expected":[{"path":"command.go","startLine":1342,"endLine":1368}]}
+{"id":"cobra-010","repo":"cobra","query":"удаление дочерних команд из родительской","lang":"ru","expected":[{"path":"command.go","startLine":1401,"endLine":1432}]}
+{"id":"cobra-011","repo":"cobra","query":"return the flags that are inherited from parent commands","lang":"en","expected":[{"path":"command.go","startLine":1744,"endLine":1766}]}
+{"id":"cobra-012","repo":"cobra","query":"локальные флаги команды, не включая унаследованные от родителя","lang":"ru","expected":[{"path":"command.go","startLine":1716,"endLine":1740}]}
+{"id":"cobra-013","repo":"cobra","query":"persistent flags that apply to this command and all its children","lang":"en","expected":[{"path":"command.go","startLine":1775,"endLine":1784}]}
+{"id":"cobra-014","repo":"cobra","query":"слияние постоянных флагов родителей в набор флагов текущей команды","lang":"ru","expected":[{"path":"command.go","startLine":1898,"endLine":1902}]}
+{"id":"cobra-015","repo":"cobra","query":"parse flags for a command","lang":"en","expected":[{"path":"command.go","startLine":1868,"endLine":1889}]}
+{"id":"cobra-016","repo":"cobra","query":"проверка, что все обязательные флаги были заданы","lang":"ru","expected":[{"path":"command.go","startLine":1180,"endLine":1201}]}
+{"id":"cobra-017","repo":"cobra","query":"validate positional args with the command's Args function","lang":"en","expected":[{"path":"command.go","startLine":1172,"endLine":1177}]}
+{"id":"cobra-018","repo":"cobra","query":"добавление флага --help по умолчанию","lang":"ru","expected":[{"path":"command.go","startLine":1219,"endLine":1232}]}
+{"id":"cobra-019","repo":"cobra","query":"add the automatic --version flag","lang":"en","expected":[{"path":"command.go","startLine":1238,"endLine":1258}]}
+{"id":"cobra-020","repo":"cobra","query":"создание команды help по умолчанию","lang":"ru","expected":[{"path":"command.go","startLine":1263,"endLine":1314}]}
+{"id":"cobra-021","repo":"cobra","query":"default function that renders the usage message from a template","lang":"en","expected":[{"path":"command.go","startLine":1974,"endLine":2040}]}
+{"id":"cobra-022","repo":"cobra","query":"шаблон справки и функция, печатающая help","lang":"ru","expected":[{"path":"command.go","startLine":2047,"endLine":2062}]}
+{"id":"cobra-023","repo":"cobra","query":"change the output writer for stdout messages","lang":"en","expected":[{"path":"command.go","startLine":296,"endLine":298}]}
+{"id":"cobra-024","repo":"cobra","query":"задание контекста для выполнения команды","lang":"ru","expected":[{"path":"command.go","startLine":275,"endLine":277}]}
+{"id":"cobra-025","repo":"cobra","query":"full path of a command including its parents' names","lang":"en","expected":[{"path":"command.go","startLine":1465,"endLine":1470}]}
+{"id":"cobra-026","repo":"cobra","query":"строка использования команды Use line с флагами и аргументами","lang":"ru","expected":[{"path":"command.go","startLine":1482,"endLine":1497}]}
+{"id":"cobra-027","repo":"cobra","query":"check if a command has an alias matching the given name","lang":"en","expected":[{"path":"command.go","startLine":1551,"endLine":1558}]}
+{"id":"cobra-028","repo":"cobra","query":"команда видна пользователю в справке, а не скрыта и не устарела","lang":"ru","expected":[{"path":"command.go","startLine":1607,"endLine":1621}]}
+{"id":"cobra-029","repo":"cobra","query":"define the Command struct with Use, Short, Long, Run fields","lang":"en","expected":[{"path":"command.go","startLine":54,"endLine":260}],"tags":["identifier"]}
+{"id":"cobra-030","repo":"cobra","query":"поле структуры, которое запускается перед основной функцией Run","lang":"ru","expected":[{"path":"command.go","startLine":54,"endLine":260}]}
+{"id":"cobra-031","repo":"cobra","query":"organize commands into groups in the help output","lang":"en","expected":[{"path":"command.go","startLine":1396,"endLine":1398}]}
+{"id":"cobra-032","repo":"cobra","query":"проверка, что у каждой дочерней команды задана группа","lang":"ru","expected":[{"path":"command.go","startLine":1376,"endLine":1383}]}
+{"id":"cobra-033","repo":"cobra","query":"reject any positional arguments","lang":"en","expected":[{"path":"args.go","startLine":42,"endLine":47}]}
+{"id":"cobra-034","repo":"cobra","query":"требовать ровно N позиционных аргументов","lang":"ru","expected":[{"path":"args.go","startLine":107,"endLine":114}]}
+{"id":"cobra-035","repo":"cobra","query":"accept arguments only from the ValidArgs list","lang":"en","expected":[{"path":"args.go","startLine":51,"endLine":66}]}
+{"id":"cobra-036","repo":"cobra","query":"комбинирование нескольких проверок позиционных аргументов","lang":"ru","expected":[{"path":"args.go","startLine":127,"endLine":136}]}
+{"id":"cobra-037","repo":"cobra","query":"allow between min and max arguments","lang":"en","expected":[{"path":"args.go","startLine":117,"endLine":124}]}
+{"id":"cobra-038","repo":"cobra","query":"mark flags that must be set together","lang":"en","expected":[{"path":"flag_groups.go","startLine":33,"endLine":45}]}
+{"id":"cobra-039","repo":"cobra","query":"флаги, которые нельзя использовать одновременно","lang":"ru","expected":[{"path":"flag_groups.go","startLine":65,"endLine":77}]}
+{"id":"cobra-040","repo":"cobra","query":"validate flag group annotations after parsing","lang":"en","expected":[{"path":"flag_groups.go","startLine":81,"endLine":109}]}
+{"id":"cobra-041","repo":"cobra","query":"ошибка, когда задана только часть флагов из обязательной группы","lang":"ru","expected":[{"path":"flag_groups.go","startLine":144,"endLine":165}]}
+{"id":"cobra-042","repo":"cobra","query":"make a flag required","lang":"en","expected":[{"path":"shell_completions.go","startLine":24,"endLine":26}]}
+{"id":"cobra-043","repo":"cobra","query":"ограничить автодополнение флага определёнными расширениями файлов","lang":"ru","expected":[{"path":"shell_completions.go","startLine":44,"endLine":46}]}
+{"id":"cobra-044","repo":"cobra","query":"register a dynamic completion function for a flag","lang":"en","expected":[{"path":"completions.go","startLine":170,"endLine":183}]}
+{"id":"cobra-045","repo":"cobra","query":"где собираются варианты автодополнения для введённых аргументов и флагов","lang":"ru","expected":[{"path":"completions.go","startLine":316,"endLine":585}]}
+{"id":"cobra-046","repo":"cobra","query":"create the hidden __complete command used by shell scripts","lang":"en","expected":[{"path":"completions.go","startLine":231,"endLine":306}]}
+{"id":"cobra-047","repo":"cobra","query":"добавление стандартной команды completion для bash, zsh, fish и powershell","lang":"ru","expected":[{"path":"completions.go","startLine":748,"endLine":930}]}
+{"id":"cobra-048","repo":"cobra","query":"options to disable the default completion command or hide its descriptions","lang":"en","expected":[{"path":"completions.go","startLine":107,"endLine":121}]}
+{"id":"cobra-049","repo":"cobra","query":"директивы для оболочки: не добавлять пробел, не предлагать файлы","lang":"ru","expected":[{"path":"completions.go","startLine":45,"endLine":45}]}
+{"id":"cobra-050","repo":"cobra","query":"pair a completion choice with a description","lang":"en","expected":[{"path":"completions.go","startLine":142,"endLine":144}]}
+{"id":"cobra-051","repo":"cobra","query":"функция автодополнения, которая возвращает фиксированный список вариантов","lang":"ru","expected":[{"path":"completions.go","startLine":160,"endLine":164}]}
+{"id":"cobra-052","repo":"cobra","query":"write debug output for completions to the BASH_COMP_DEBUG_FILE","lang":"en","expected":[{"path":"completions.go","startLine":955,"endLine":974}]}
+{"id":"cobra-053","repo":"cobra","query":"append an active help message to the completions","lang":"en","expected":[{"path":"active_help.go","startLine":38,"endLine":40}]}
+{"id":"cobra-054","repo":"cobra","query":"считать из переменной окружения, включена ли активная помощь для программы","lang":"ru","expected":[{"path":"active_help.go","startLine":47,"endLine":53}]}
+{"id":"cobra-055","repo":"cobra","query":"generate the bash completion script, version 2","lang":"en","expected":[{"path":"bash_completionsV2.go","startLine":482,"endLine":484}]}
+{"id":"cobra-056","repo":"cobra","query":"генерация скрипта автодополнения для fish","lang":"ru","expected":[{"path":"fish_completions.go","startLine":276,"endLine":281}]}
+{"id":"cobra-057","repo":"cobra","query":"PowerShell completion generator","lang":"en","expected":[{"path":"powershell_completions.go","startLine":28,"endLine":44}]}
+{"id":"cobra-058","repo":"cobra","query":"генерация скрипта для zsh без описаний","lang":"ru","expected":[{"path":"zsh_completions.go","startLine":42,"endLine":44}]}
+{"id":"cobra-059","repo":"cobra","query":"generate markdown documentation for a command","lang":"en","expected":[{"path":"doc/md_docs.go","startLine":57,"endLine":117}]}
+{"id":"cobra-060","repo":"cobra","query":"рекурсивная генерация документации в формате man для всего дерева команд","lang":"ru","expected":[{"path":"doc/man_docs.go","startLine":48,"endLine":80}]}
+{"id":"cobra-061","repo":"cobra","query":"write command documentation in YAML format","lang":"en","expected":[{"path":"doc/yaml_docs.go","startLine":93,"endLine":147}]}
+{"id":"cobra-062","repo":"cobra","query":"генерация reStructuredText документации с кастомным обработчиком ссылок","lang":"ru","expected":[{"path":"doc/rest_docs.go","startLine":62,"endLine":130}]}
+{"id":"cobra-063","repo":"cobra","query":"install a template function usable in usage and help templates","lang":"en","expected":[{"path":"cobra.go","startLine":85,"endLine":87}]}
+{"id":"cobra-064","repo":"cobra","query":"функции, которые выполняются перед запуском любой команды","lang":"ru","expected":[{"path":"cobra.go","startLine":99,"endLine":101}]}
+{"id":"cobra-065","repo":"cobra","query":"print an error and exit with code 1","lang":"en","expected":[{"path":"cobra.go","startLine":235,"endLine":240}]}
+{"id":"cobra-066","repo":"cobra","query":"Levenshtein distance used for suggestions","lang":"en","expected":[{"path":"cobra.go","startLine":192,"endLine":223}]}
+{"id":"cobra-067","repo":"cobra","query":"how to create the root command and main.go in the user guide","lang":"en","expected":[{"path":"site/content/user_guide.md","startLine":40,"endLine":137}]}
+{"id":"cobra-068","repo":"cobra","query":"как работать с постоянными флагами в руководстве","lang":"ru","expected":[{"path":"site/content/user_guide.md","startLine":266,"endLine":274}]}
+{"id":"cobra-069","repo":"cobra","query":"руководство: привязка флагов к конфигурации через viper","lang":"ru","expected":[{"path":"site/content/user_guide.md","startLine":297,"endLine":314}]}
+{"id":"cobra-070","repo":"cobra","query":"documentation of PreRun and PostRun hooks execution order","lang":"en","expected":[{"path":"site/content/user_guide.md","startLine":688,"endLine":775}]}
+{"id":"cobra-071","repo":"cobra","query":"в документации описано, как пользователь настраивает подсказки при неизвестной команде","lang":"ru","expected":[{"path":"site/content/user_guide.md","startLine":777,"endLine":816}]}
+{"id":"cobra-072","repo":"cobra","query":"docs for generating zsh completions with descriptions","lang":"en","expected":[{"path":"site/content/completions/_index.md","startLine":492,"endLine":525}]}
+{"id":"cobra-073","repo":"cobra","query":"документация по динамическому автодополнению существительных","lang":"ru","expected":[{"path":"site/content/completions/_index.md","startLine":168,"endLine":271}]}
+{"id":"cobra-074","repo":"cobra","query":"how users can disable active help via environment variable","lang":"en","expected":[{"path":"site/content/active_help.md","startLine":95,"endLine":140}]}
