@@ -1,0 +1,51 @@
+name: native-smoke
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "**/package.json"
+      - "pnpm-lock.yaml"
+
+jobs:
+  smoke:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: win32-x64, os: windows-2022 }
+          - { target: win32-arm64, os: windows-11-arm }
+          - { target: darwin-x64, os: macos-13 }
+          - { target: darwin-arm64, os: macos-14 }
+          - { target: linux-x64, os: ubuntu-22.04 }
+          - { target: linux-arm64, os: ubuntu-22.04-arm }
+    runs-on: ${{ matrix.os }}
+    env:
+      STAGE0_REPORT_DIR: ${{ github.workspace }}/stage0-reports
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm stage0
+      - name: Electron (Linux, xvfb)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libgbm1 libasound2 libgtk-3-0
+          xvfb-run -a pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts
+      - name: Electron
+        if: runner.os != 'Linux'
+        run: pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stage0-${{ matrix.target }}
+          path: stage0-reports/*.json
+          if-no-files-found: warn
