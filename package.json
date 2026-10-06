@@ -1,0 +1,24 @@
+{
+  "name": "code-embed-monorepo",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.22.0",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --parallel typecheck",
+    "test": "vitest run",
+    "build": "pnpm -r build",
+    "check:docs": "node scripts/check-docs.mjs",
+    "eval": "pnpm --filter @code-embed/eval run eval",
+    "stage0": "pnpm --filter @code-embed/eval run stage0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

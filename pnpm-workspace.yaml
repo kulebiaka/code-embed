@@ -1,0 +1,13 @@
+packages:
+  - "packages/*"
+  - "eval"
+
+# All native packages ship prebuilt binaries; their install scripts only rebuild from source
+# or download optional CUDA binaries, which we do not need.
+ignoredBuiltDependencies:
+  - "@parcel/watcher"
+  - "@vscode/vsce-sign"
+  - esbuild
+  - keytar
+  - onnxruntime-node
+  - protobufjs
