@@ -1,11 +1,25 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { INDEX_DIR_NAME } from "./location";
+
 export const INDEX_DB = "index.db";
 export const META_FILE = "meta.json";
 export const LOCK_FILE = "lock";
 
-export function ensureIndexDir(_dir: string): { created: boolean } {
-  throw new Error("not implemented: core/index-dir.ensureIndexDir");
+export function ensureIndexDir(dir: string): { created: boolean } {
+  const created = !existsSync(dir);
+  mkdirSync(dir, { recursive: true });
+  const gitignore = join(dir, ".gitignore");
+  if (!existsSync(gitignore)) writeFileSync(gitignore, "*\n");
+  return { created };
 }
 
-export function dockerignoreWarning(_root: string): string | null {
-  throw new Error("not implemented: core/index-dir.dockerignoreWarning");
+export function dockerignoreWarning(root: string): string | null {
+  if (!existsSync(join(root, "Dockerfile"))) return null;
+  let content = "";
+  try {
+    content = readFileSync(join(root, ".dockerignore"), "utf8");
+  } catch {}
+  if (content.includes(INDEX_DIR_NAME)) return null;
+  return `Dockerfile found but .dockerignore does not exclude ${INDEX_DIR_NAME}; add "${INDEX_DIR_NAME}" to .dockerignore to keep the index out of images`;
 }
