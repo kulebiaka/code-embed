@@ -38,7 +38,7 @@ async function connect(root: string): Promise<Client> {
 }
 
 function text(res: unknown): string {
-  return (res as { content: Array<{ text: string }> }).content[0].text;
+  return (res as { content: Array<{ text: string }> }).content[0]!.text;
 }
 
 beforeEach(() => {

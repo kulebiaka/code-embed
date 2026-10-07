@@ -6,7 +6,7 @@ import { EXIT, type CommandRun } from "../types";
 export const run: CommandRun = async (argv, io) => {
   let root: string | undefined;
   for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
+    const a = argv[i]!;
     if (a === "--root") {
       root = argv[++i];
       if (!root) {
