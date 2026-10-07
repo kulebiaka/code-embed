@@ -8,7 +8,7 @@ import { parseArgs } from "node:util";
 
 export const TARGETS = ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"];
 
-const bundled = new Set(["onnxruntime-web", "tree-sitter-wasms"]);
+const bundled = new Set(["onnxruntime-web", "tree-sitter-wasms", "sharp"]);
 const prunePaths = {
   "@huggingface/transformers": [
     "src",
@@ -111,6 +111,19 @@ async function copyRuntimeDeps(found, target, dest) {
   }
 }
 
+async function writeSharpStub(dest) {
+  const dir = join(dest, "sharp");
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, "package.json"),
+    JSON.stringify({ name: "sharp", version: "0.0.0-stub", type: "module", main: "index.js" }),
+  );
+  await writeFile(
+    join(dir, "index.js"),
+    'export default function sharp() {\n  throw new Error("sharp is not bundled: image processing is not supported");\n}\n',
+  );
+}
+
 async function main() {
   const { values } = parseArgs({
     options: {
@@ -170,6 +183,7 @@ async function main() {
     if (existsSync(join(extDir, ".vscodeignore"))) await cp(join(extDir, ".vscodeignore"), join(stage, ".vscodeignore"));
 
     await copyRuntimeDeps(found, target, join(dist, "engine/node_modules"));
+    await writeSharpStub(join(dist, "engine/node_modules"));
 
     const out = resolve(values.out);
     await mkdir(out, { recursive: true });

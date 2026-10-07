@@ -1,7 +1,19 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { PreTrainedTokenizer } from "@huggingface/transformers";
+import { ProviderUnavailableError } from "../errors";
 import type { ModelEntry } from "./types";
+
+export type Transformers = typeof import("@huggingface/transformers");
+
+export async function loadTransformers(): Promise<Transformers> {
+  try {
+    return await import("@huggingface/transformers");
+  } catch (err) {
+    throw new ProviderUnavailableError(
+      `local ML runtime is unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
 
 export interface StaticModel {
   dims: number;
@@ -51,6 +63,7 @@ export async function loadStaticModel(dir: string, entry: ModelEntry): Promise<S
     readFile(join(dir, "tokenizer.json"), "utf8"),
   ]);
   const { rows, cols, data } = parseSafetensorsMatrix(weights);
+  const { PreTrainedTokenizer } = await loadTransformers();
   const tokenizer = new PreTrainedTokenizer(JSON.parse(tokJson), {});
 
   const ids = (text: string): number[] =>

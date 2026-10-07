@@ -141,3 +141,21 @@ describe("local embedder", () => {
     expect(emb.countTokens("a b c")).toBe(3);
   });
 });
+
+describe("unavailable ML runtime", () => {
+  it("maps import failure to ProviderUnavailableError and retries the load", async () => {
+    let attempts = 0;
+    vi.resetModules();
+    vi.doMock("@huggingface/transformers", () => {
+      attempts++;
+      throw new Error("dlopen failed: sharp");
+    });
+    const { createLocalEmbedder: create } = await import("./local");
+    const { ProviderUnavailableError } = await import("../errors");
+    const emb = create(getModel("bge-m3"), opts);
+    await expect(emb.init()).rejects.toBeInstanceOf(ProviderUnavailableError);
+    await expect(emb.embedQueries(["q"])).rejects.toThrow(/local ML runtime is unavailable: /);
+    expect(attempts).toBe(2);
+    vi.doUnmock("@huggingface/transformers");
+  });
+});
