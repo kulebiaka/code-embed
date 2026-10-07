@@ -1,5 +1,6 @@
+import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import envPaths from "env-paths";
 import { blake3Hex } from "../util/hash";
 
@@ -19,8 +20,19 @@ export function embCachePath(): string {
   return join(cacheDir(), "emb.db");
 }
 
+const upperDrive = (p: string) => (process.platform === "win32" ? p.replace(/^[a-z]:/, (d) => d.toUpperCase()) : p);
+
+export function canonicalRoot(root: string): string {
+  const input = upperDrive(root);
+  try {
+    return upperDrive(realpathSync.native(input));
+  } catch {
+    return upperDrive(resolve(input));
+  }
+}
+
 export function rootHash(root: string): string {
-  return blake3Hex(root).slice(0, 16);
+  return blake3Hex(canonicalRoot(root)).slice(0, 16);
 }
 
 export function socketPath(root: string): string {

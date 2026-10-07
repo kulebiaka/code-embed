@@ -8,7 +8,7 @@ import { dockerignoreWarning, ensureIndexDir, LOCK_FILE, META_FILE } from "./ind
 import { acquireLock, isProcessAlive, readLockPid } from "./lock";
 import { detectRiskyPath, INDEX_DIR_NAME, resolveIndexDir } from "./location";
 import { compareMeta, type IndexMeta, readMeta, SCHEMA_VERSION, writeMeta } from "./meta";
-import { cacheDir, configDir, embCachePath, modelsDir, rootHash, socketPath } from "./paths";
+import { cacheDir, canonicalRoot, configDir, embCachePath, modelsDir, rootHash, socketPath } from "./paths";
 import { findProjectRoot } from "./root";
 
 let tmp: string;
@@ -210,6 +210,17 @@ describe("paths", () => {
     expect(socketPath("/r")).toBe(`/tmpx/code-embed/${h}.sock`);
     setPlatform("win32");
     expect(socketPath("/r")).toBe(`\\\\.\\pipe\\code-embed-${h}`);
+  });
+
+  it("canonicalRoot unifies symlinks and drive-letter case", () => {
+    mkdirSync(join(tmp, "real"));
+    symlinkSync(join(tmp, "real"), join(tmp, "link"));
+    expect(canonicalRoot(join(tmp, "link"))).toBe(canonicalRoot(join(tmp, "real")));
+    expect(rootHash(join(tmp, "link"))).toBe(rootHash(join(tmp, "real")));
+    expect(socketPath(join(tmp, "link"))).toBe(socketPath(join(tmp, "real")));
+    expect(() => canonicalRoot(join(tmp, "missing"))).not.toThrow();
+    setPlatform("win32");
+    expect(rootHash("c:\\proj")).toBe(rootHash("C:\\proj"));
   });
 
   it("socketPath fits sun_path limits", () => {

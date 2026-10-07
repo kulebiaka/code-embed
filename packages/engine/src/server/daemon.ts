@@ -12,7 +12,7 @@ import {
 import { StreamMessageReader, StreamMessageWriter, createMessageConnection } from "vscode-jsonrpc/node";
 import { ensureIndexDir } from "../core/index-dir";
 import { acquireLock, isProcessAlive, readLockPid } from "../core/lock";
-import { cacheDir, rootHash, socketPath } from "../core/paths";
+import { cacheDir, canonicalRoot, rootHash, socketPath } from "../core/paths";
 import { SERVER_VERSION } from "../engine/service";
 import type { LocalEngine } from "../engine/types";
 import { LockedError } from "../errors";
@@ -106,7 +106,7 @@ export async function runDaemon(opts: DaemonOptions): Promise<void> {
 
   const facadeFor = (): EngineApi => ({
     initialize: async (p) => {
-      if (p.root !== root) {
+      if (canonicalRoot(p.root) !== canonicalRoot(root)) {
         throw new EngineRpcError(-32600, `daemon serves ${root}, not ${p.root}`);
       }
       if (!initialized) {

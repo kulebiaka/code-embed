@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -112,6 +112,21 @@ describeUnix("daemon over a unix socket", () => {
     a!.close();
     b!.close();
     expect(await connectDaemon(root, "c")).toBeNull();
+  });
+
+  it("accepts a symlinked root and rejects a foreign one", async () => {
+    const link = join(tmp, "link");
+    symlinkSync(root, link);
+    const other = join(tmp, "other");
+    mkdirSync(other);
+    const { done } = await startDaemon(fakeEngine());
+    const c = (await connectDaemon(root, "a"))!;
+    expect((await c.initialize({ ...init("a"), root: link })).protocolVersion).toBe(PROTOCOL_VERSION);
+    const err = await c.initialize({ ...init("a"), root: other }).catch((e: unknown) => e);
+    expect((err as EngineRpcError).code).toBe(-32600);
+    c.close();
+    await stopDaemon(root);
+    await done;
   });
 
   it("refuses to start a second daemon", async () => {
