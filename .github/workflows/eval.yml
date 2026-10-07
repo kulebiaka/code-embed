@@ -1,0 +1,42 @@
+name: Eval
+
+on:
+  pull_request:
+    paths:
+      - "packages/engine/src/chunk/**"
+      - "packages/engine/src/lex/**"
+      - "packages/engine/src/embed/**"
+      - "eval/**"
+      - ".github/workflows/eval.yml"
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CODE_EMBED_CACHE_DIR: ${{ github.workspace }}/.ci-cache/code-embed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: .ci-cache/code-embed/models
+          key: models-${{ hashFiles('packages/engine/src/embed/models.json') }}
+      - uses: actions/cache@v4
+        with:
+          path: eval/.repos
+          key: eval-repos-${{ hashFiles('eval/repos.json') }}
+      - run: pnpm --filter @code-embed/eval run fetch-repos
+      - run: pnpm --filter @code-embed/eval run eval -- --strict
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: eval/reports/
+          if-no-files-found: warn
