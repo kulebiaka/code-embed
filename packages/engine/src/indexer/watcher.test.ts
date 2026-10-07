@@ -108,6 +108,7 @@ describe("startWatcher", () => {
       debounceMs: 100,
       onBatch: async (c) => void batches.push(c),
     });
+    expect(w).not.toBeNull();
     try {
       const f = join(dir, "x.ts");
       writeFileSync(join(indexDir, "index.db"), "z");
@@ -122,7 +123,7 @@ describe("startWatcher", () => {
 
       const g = join(dir, "client.ts");
       writeFileSync(g, "c");
-      w.notify({ created: [], changed: [g], deleted: [] });
+      w!.notify({ created: [], changed: [g], deleted: [] });
       await vi.waitFor(() => expect(batches.flatMap((b) => [...b.created, ...b.changed])).toContain(g), {
         timeout: 5000,
       });
@@ -130,7 +131,30 @@ describe("startWatcher", () => {
       const hits = batches.flatMap((b) => [...b.created, ...b.changed]).filter((p) => p === g);
       expect(hits).toHaveLength(1);
     } finally {
-      await w.close();
+      await w!.close();
+    }
+  });
+});
+
+describe("startWatcher without native watcher", () => {
+  it("returns null and warns when @parcel/watcher fails to load", async () => {
+    vi.resetModules();
+    vi.doMock("@parcel/watcher", () => ({
+      get subscribe() {
+        throw new Error("dlopen failed: different Team IDs");
+      },
+    }));
+    try {
+      const { log } = await import("../util/log");
+      const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+      const { startWatcher: start } = await import("./watcher");
+      const w = await start({ root: dir, indexDir: join(dir, ".code-embed"), exclude: [], onBatch: async () => {} });
+      expect(w).toBeNull();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("different Team IDs"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("file watcher is unavailable"));
+    } finally {
+      vi.doUnmock("@parcel/watcher");
+      vi.resetModules();
     }
   });
 });
