@@ -1,7 +1,7 @@
 import type { ResultSource, SearchParams, SearchResponse, SearchResult } from "@code-embed/protocol";
 import { ProviderUnavailableError } from "../errors";
 import { buildSnippet } from "../lex/highlight";
-import { compileFilters } from "./filters";
+import { compileFilters, normalizeLang } from "./filters";
 import { rrfFuse } from "./fuse";
 import { lexicalCandidates } from "./lexical";
 import { routeWeights } from "./route";
@@ -20,9 +20,10 @@ export async function search(ctx: SearchContext, params: SearchParams, signal?: 
   const mode = params.mode ?? "hybrid";
   const top = params.top ?? DEFAULT_TOP;
   const query = params.query;
-  const filter = compileFilters(params);
+  const lang = normalizeLang(params.lang);
+  const filter = compileFilters({ ...params, lang });
   const hasGlobs = Boolean(params.include?.length || params.exclude?.length);
-  const storeFilter = { lang: params.lang, pathPrefix: params.pathPrefix };
+  const storeFilter = { lang, pathPrefix: params.pathPrefix };
   const pool = Math.max(VECTOR_POOL, top * 3);
 
   let partial = false;

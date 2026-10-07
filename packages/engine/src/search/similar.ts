@@ -7,7 +7,7 @@ import { buildSnippet } from "../lex/highlight";
 import { queryTerms } from "../lex/tokenize";
 import { dequantizeInt8 } from "../store/quantize";
 import type { ChunkRecord } from "../store/types";
-import { compileFilters } from "./filters";
+import { compileFilters, normalizeLang } from "./filters";
 import { lexicalCandidates } from "./lexical";
 import type { SearchContext } from "./types";
 import { vectorCandidates } from "./vector";
@@ -39,8 +39,9 @@ export async function findSimilar(
   const t0 = performance.now();
   signal?.throwIfAborted();
   const top = params.top ?? DEFAULT_TOP;
-  const filter = compileFilters(params);
-  const storeFilter = { lang: params.lang, pathPrefix: params.pathPrefix };
+  const filterLang = normalizeLang(params.lang);
+  const filter = compileFilters({ ...params, lang: filterLang });
+  const storeFilter = { lang: filterLang, pathPrefix: params.pathPrefix };
 
   let text: string;
   let lang: string | null;
@@ -49,7 +50,7 @@ export async function findSimilar(
   let reuse: ChunkRecord | undefined;
   if ("code" in params) {
     text = params.code;
-    lang = params.lang ?? null;
+    lang = filterLang ?? null;
   } else {
     path = params.path;
     const range = params.range;

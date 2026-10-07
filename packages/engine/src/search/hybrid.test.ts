@@ -160,6 +160,14 @@ describe("search", () => {
     await build();
     const base = { query: "function gateway refund charge" };
     expect((await search(ctx(), { ...base, lang: "typescript" })).results.every((x) => x.lang === "typescript")).toBe(true);
+    for (const mode of ["hybrid", "semantic", "lexical"] as const) {
+      const ref = await search(ctx(), { ...base, mode, lang: "typescript" });
+      expect(ref.results.length).toBeGreaterThan(0);
+      for (const alias of ["ts", "TS", "TypeScript"]) {
+        const r = await search(ctx(), { ...base, mode, lang: alias });
+        expect(r.results.map((x) => x.path)).toEqual(ref.results.map((x) => x.path));
+      }
+    }
     expect((await search(ctx(), { ...base, pathPrefix: "src/payment/" })).results.every((x) => x.path.startsWith("src/payment/"))).toBe(true);
     const inc = await search(ctx(), { ...base, include: ["**/*.ts"], exclude: ["**/charge.ts"] });
     expect(inc.results.length).toBeGreaterThan(0);
