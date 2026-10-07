@@ -69,8 +69,8 @@ export interface SearchResponse {
 }
 
 export type FindSimilarParams =
-  | ({ path: string; range: LineRange; top?: number } & SearchFilters)
-  | ({ code: string; lang?: string; top?: number } & SearchFilters);
+  | ({ path: string; range: LineRange; top?: number; threshold?: number } & SearchFilters)
+  | ({ code: string; lang?: string; top?: number; threshold?: number } & SearchFilters);
 
 export type IndexPhase = "idle" | "scanning" | "lexical" | "vector" | "model-download" | "paused" | "error";
 

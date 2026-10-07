@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openEmbCache } from "../cache/embcache";
 import type { EmbCache } from "../cache/types";
@@ -159,7 +159,7 @@ describe("findSimilar", () => {
     expect(py.results.map((x) => x.path)).toEqual(["src/parse.py"]);
     const ex = await findSimilar(ctx(), { code, exclude: ["src/refund*.ts"] });
     expect(ex.results.map((x) => x.path)).toEqual(["src/parse.py"]);
-    const th = await findSimilar(ctx(), { code, threshold: 0.99 } as Parameters<typeof findSimilar>[1]);
+    const th = await findSimilar(ctx(), { code, threshold: 0.99 });
     expect(th.results.every((x) => x.score >= 0.99)).toBe(true);
     expect(th.results.length).toBeLessThan(4);
   });
@@ -175,5 +175,31 @@ describe("findSimilar", () => {
     expect(r.results[0]!.path).toBe("src/refund2.ts");
     expect(r.results[0]!.sources).toEqual(["lexical"]);
     expect(r.results.some((x) => x.path === "src/refund.ts" && x.range.startLine === 1)).toBe(false);
+  });
+
+  it("accepts absolute, ./ and backslash paths like the relative one", async () => {
+    await build();
+    const range = { startLine: 1, endLine: 3 };
+    const base = await findSimilar(ctx(), { path: "src/refund.ts", range });
+    for (const path of [join(dir, "src", "refund.ts"), "./src/refund.ts", "src\\refund.ts", "src/../src/refund.ts"]) {
+      const r = await findSimilar(ctx(), { path, range });
+      expect(r.results).toEqual(base.results);
+      expect(r.results.some((x) => x.path === "src/refund.ts" && x.range.startLine === 1)).toBe(false);
+    }
+  });
+
+  it("rejects paths outside the root", async () => {
+    await build();
+    const range = { startLine: 1, endLine: 3 };
+    for (const path of [`${sep}elsewhere${sep}a.ts`, "../x.ts", "src/../../x.ts", dir]) {
+      await expect(findSimilar(ctx(), { path, range })).rejects.toThrow(`path is outside the project root: ${path}`);
+    }
+  });
+
+  it("rejects files that are neither indexed nor on disk", async () => {
+    await build();
+    await expect(findSimilar(ctx(), { path: "src/missing.ts", range: { startLine: 1, endLine: 2 } })).rejects.toThrow(
+      "file is not indexed: src/missing.ts",
+    );
   });
 });
