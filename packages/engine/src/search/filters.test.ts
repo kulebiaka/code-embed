@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileFilters } from "./filters";
+import { compileFilters, normalizeLang } from "./filters";
 
 describe("compileFilters", () => {
   it("accepts everything without filters", () => {
@@ -19,5 +19,39 @@ describe("compileFilters", () => {
   });
   it("matches dotfiles and bare basenames", () => {
     expect(compileFilters({ include: ["*.md"] })("docs/.hidden/x.md", null)).toBe(true);
+  });
+});
+
+describe("normalizeLang", () => {
+  it.each([
+    [undefined, undefined],
+    ["", undefined],
+    ["  ", undefined],
+    ["ts", "typescript"],
+    ["TS", "typescript"],
+    [" TypeScript ", "typescript"],
+    ["tsx", "tsx"],
+    ["js", "javascript"],
+    ["py", "python"],
+    ["rs", "rust"],
+    ["md", "markdown"],
+    ["yml", "yaml"],
+    ["sh", "shell"],
+    ["bash", "shell"],
+    ["kt", "kotlin"],
+    ["rb", "ruby"],
+    ["cs", "csharp"],
+    ["golang", "go"],
+    ["c++", "cpp"],
+    ["c#", "csharp"],
+    ["go", "go"],
+    ["python", "python"],
+    ["Klingon", "klingon"],
+  ])("%j -> %j", (input, expected) => {
+    expect(normalizeLang(input)).toBe(expected);
+  });
+  it("compileFilters uses normalized lang", () => {
+    expect(compileFilters({ lang: "TS" })("a.ts", "typescript")).toBe(true);
+    expect(compileFilters({ lang: "ts" })("a.py", "python")).toBe(false);
   });
 });

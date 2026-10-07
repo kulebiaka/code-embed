@@ -134,6 +134,22 @@ describe("findSimilar", () => {
     expect(r.results[0]!.path).toBe("src/parse.py");
   });
 
+  it("normalizes lang aliases", async () => {
+    await build();
+    const r = await findSimilar(ctx(), { code: "def parse_config(path): return load(path)", lang: "py" });
+    expect(embedCalls[0]![0]).toContain("lang: python");
+    expect(r.results.map((x) => x.path)).toEqual(["src/parse.py"]);
+    const code = "function processPaymentRefund(order) { return gateway.refund(order.amount); }";
+    for (const alias of ["ts", "TS"]) {
+      const ts = await findSimilar(ctx(), { code, lang: alias });
+      expect(ts.results.length).toBeGreaterThan(0);
+      expect(ts.results.every((x) => x.lang === "typescript")).toBe(true);
+    }
+    const lex = await findSimilar(ctx({ embedder: undefined }), { code, lang: "ts" });
+    expect(lex.results.length).toBeGreaterThan(0);
+    expect(lex.results.every((x) => x.lang === "typescript")).toBe(true);
+  });
+
   it("applies top, filters and threshold", async () => {
     await build();
     const code = "function processPaymentRefund(order) { return gateway.refund(order.amount); }";
