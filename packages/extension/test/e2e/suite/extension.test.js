@@ -73,10 +73,6 @@ describe("Code Embed in VS Code", function () {
         .map((p) => p.value)
         .join("");
       if (out.includes("refund.ts")) break;
-      // Electron of 1.101 on macOS rejects sharp's native binary (different Team ID); newer builds load it.
-      if (process.platform === "darwin" && vscode.version.startsWith("1.101.") && out.includes("engine is failed")) {
-        this.skip();
-      }
       await sleep(1500);
     }
     assert.ok(out.includes("src/payment/refund.ts"), out);

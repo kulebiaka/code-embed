@@ -1,7 +1,7 @@
-import { AutoModel, AutoTokenizer, env } from "@huggingface/transformers";
+import type { AutoModel, AutoTokenizer } from "@huggingface/transformers";
 import { ensureModel } from "./delivery";
 import { modelIdOf } from "./model-id";
-import { loadStaticModel, type StaticModel } from "./static";
+import { loadStaticModel, loadTransformers, type StaticModel } from "./static";
 import type { Embedder, EmbedderInfo, ModelEntry } from "./types";
 
 export interface LocalEmbedderOptions {
@@ -113,6 +113,7 @@ export function createLocalEmbedder(entry: ModelEntry, opts: LocalEmbedderOption
       staticModel = await loadStaticModel(dir, entry);
       return;
     }
+    const { AutoModel, AutoTokenizer, env } = await loadTransformers();
     env.localModelPath = opts.modelsDir;
     env.allowRemoteModels = false;
     env.allowLocalModels = true;
