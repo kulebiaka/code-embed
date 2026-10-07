@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderConfig } from "@code-embed/protocol";
 
-vi.mock("../core/paths", () => ({ configDir: () => process.env.CODE_EMBED_CONFIG_DIR as string }));
+vi.mock("../core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../core/paths")>()),
+  configDir: () => process.env.CODE_EMBED_CONFIG_DIR as string,
+}));
 
 import { grantConsent, hasConsent } from "./consents";
 import { loadProjectConfig, writeProjectConfig } from "./project";
