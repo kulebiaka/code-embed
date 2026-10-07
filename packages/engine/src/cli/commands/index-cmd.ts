@@ -61,10 +61,14 @@ export const run: CommandRun = async (argv, io) => {
       let failure: string | null = null;
       if (opened.local) {
         const local = opened.local;
-        const res = await withConsent(io, opened.api, () => local.indexAll({ full, signal: abort.signal }));
+        const res = await withConsent(io, opened.api, () =>
+          local.indexAll({ full, signal: abort.signal }).then(() => true),
+        );
         if (res === null) return EXIT.ERROR;
       } else {
-        const res = await withConsent(io, opened.api, () => opened.api.rebuild({ full }));
+        const res = await withConsent(io, opened.api, () =>
+          opened.api.rebuild({ full }).then(() => true),
+        );
         if (res === null) return EXIT.ERROR;
         failure = await waitForDaemon(opened.api);
       }
