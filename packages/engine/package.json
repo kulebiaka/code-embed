@@ -7,8 +7,21 @@
   "bin": {
     "code-embed": "dist/cli.js"
   },
+  "files": [
+    "dist/cli.js",
+    "dist/grammars",
+    "dist/tree-sitter.wasm"
+  ],
   "engines": {
     "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/code-embed/code-embed.git",
+    "directory": "packages/engine"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "typecheck": "tsc -p . --noEmit",

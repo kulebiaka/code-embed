@@ -1,0 +1,74 @@
+name: models-mirror
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag for the model mirror (models-v<N>, must match mirror.tag in models.json)"
+        required: true
+        default: models-v1
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    env:
+      CODE_EMBED_CACHE_DIR: ${{ github.workspace }}/model-cache
+      MANIFEST: packages/engine/src/embed/models.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Validate tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^models-v[0-9]+$ ]] || { echo "tag must look like models-v<N>"; exit 1; }
+          manifest_tag=$(node -p "require('./$MANIFEST').mirror.tag")
+          [ "$manifest_tag" = "$TAG" ] || { echo "models.json mirror.tag is $manifest_tag, expected $TAG"; exit 1; }
+      - name: Download models
+        run: |
+          for id in $(node -p "require('./$MANIFEST').models.map((m) => m.id).join(' ')"); do
+            node packages/engine/dist/cli.js model install --model "$id"
+          done
+      - name: Verify sha256
+        run: |
+          node --input-type=module <<'JS'
+          import { createHash } from "node:crypto";
+          import { readFileSync } from "node:fs";
+          import { join } from "node:path";
+          const manifest = JSON.parse(readFileSync(process.env.MANIFEST, "utf8"));
+          const dir = join(process.env.CODE_EMBED_CACHE_DIR, "models");
+          let bad = 0;
+          for (const m of manifest.models) {
+            for (const f of m.files) {
+              const sum = createHash("sha256").update(readFileSync(join(dir, m.id, f.path))).digest("hex");
+              if (sum !== f.sha256) {
+                console.error(`sha256 mismatch: ${m.id}/${f.path}`);
+                bad++;
+              }
+            }
+          }
+          process.exit(bad ? 1 : 0);
+          JS
+      - name: Pack archives
+        run: |
+          mkdir -p mirror
+          for id in $(node -p "require('./$MANIFEST').models.map((m) => m.id).join(' ')"); do
+            tar -cf "mirror/$id.tar" -C "$CODE_EMBED_CACHE_DIR/models" "$id"
+          done
+          (cd mirror && sha256sum *.tar > SHA256SUMS)
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "Model mirror"
+          gh release upload "$TAG" mirror/*.tar mirror/SHA256SUMS --clobber

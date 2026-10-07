@@ -1,0 +1,12 @@
+**/*.map
+**/*.md
+**/*.d.ts
+src/**
+test/**
+scripts/**
+webview/**
+dist-vsix/**
+tsconfig.json
+.vscode-test/**
+!README.md
+!dist/engine/node_modules/**
