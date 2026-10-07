@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { FindSimilarParams, SearchResponse, SearchResult } from "@code-embed/protocol";
 import { buildEmbeddingText } from "../chunk/header";
 import { ProviderUnavailableError } from "../errors";
@@ -20,6 +20,14 @@ const MAX_TERMS = 24;
 
 function overlapLines(a: { startLine: number; endLine: number }, b: { startLine: number; endLine: number }): number {
   return Math.max(0, Math.min(a.endLine, b.endLine) - Math.max(a.startLine, b.startLine) + 1);
+}
+
+function normalizePath(root: string, raw: string): string {
+  const p = raw.replace(/\\/g, "/");
+  const abs = isAbsolute(p) || /^[A-Za-z]:\//.test(p) ? resolve(p) : resolve(root, p);
+  const rel = relative(root, abs);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) throw new Error(`path is outside the project root: ${raw}`);
+  return rel.split(sep).join("/");
 }
 
 async function readRange(root: string, path: string, startLine: number, endLine: number): Promise<string | null> {
@@ -52,16 +60,18 @@ export async function findSimilar(
     text = params.code;
     lang = filterLang ?? null;
   } else {
-    path = params.path;
+    path = normalizePath(ctx.root, params.path);
     const range = params.range;
     const chunks = ctx.store.chunksForFile(path);
+    const file = ctx.store.getFile(path);
     overlapping = chunks.filter((c) => overlapLines(c, range) > 0);
     const rangeLen = range.endLine - range.startLine + 1;
     reuse = overlapping.find(
       (c) => overlapLines(c, range) / Math.max(rangeLen, c.endLine - c.startLine + 1) >= REUSE_RATIO,
     );
-    lang = ctx.store.getFile(path)?.lang ?? chunks[0]?.lang ?? null;
+    lang = file?.lang ?? chunks[0]?.lang ?? null;
     const fromDisk = reuse ? null : await readRange(ctx.root, path, range.startLine, range.endLine);
+    if (!file && chunks.length === 0 && fromDisk === null) throw new Error(`file is not indexed: ${params.path}`);
     text = fromDisk ?? (reuse ?? overlapping[0])?.text ?? "";
   }
   const excluded = new Set(overlapping.map((c) => c.id));
@@ -120,7 +130,7 @@ export async function findSimilar(
 
   const candidates = scored.filter((h) => !excluded.has(h.id));
   const max = candidates[0]?.score ?? 0;
-  const threshold = (params as { threshold?: number }).threshold;
+  const threshold = params.threshold;
   const kept = candidates
     .map((h) => ({ id: h.id, score: max > 0 ? Math.max(0, h.score / max) : 0 }))
     .filter((h) => threshold === undefined || h.score >= threshold);

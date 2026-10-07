@@ -24,7 +24,7 @@ export const run: CommandRun = async (argv, io) => {
     if (target === "-") {
       const code = await readStdin(io);
       if (code.trim() === "") throw new UsageError("no code received on stdin");
-      params = { code, top: flags.top, ...filters };
+      params = { code, top: flags.top, threshold: flags.threshold, ...filters };
     } else {
       const m = LOCATION.exec(target);
       if (!m) throw new UsageError(`expected <PATH>:<START>-<END>, got "${target}"`);
@@ -34,7 +34,7 @@ export const run: CommandRun = async (argv, io) => {
       const root = resolveRoot(io, flags);
       const rel = relative(root, resolve(io.cwd, m[1]!)).split(sep).join("/");
       if (rel.startsWith("..")) throw new UsageError(`${m[1]} is outside the project root ${root}`);
-      params = { path: rel, range: { startLine, endLine }, top: flags.top, ...filters };
+      params = { path: rel, range: { startLine, endLine }, top: flags.top, threshold: flags.threshold, ...filters };
     }
 
     return await runQuery(io, flags, (api) => api.findSimilar(params));
