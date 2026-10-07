@@ -129,7 +129,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
     if (missing.length > 0) {
       const texts = missing.map((h) => {
         const r = firstByHash.get(h)!;
-        return buildEmbeddingText({ ...r, signature: null }, { path: r.path, lang: r.lang });
+        return buildEmbeddingText(r, { path: r.path, lang: r.lang });
       });
       const out = await embedder.embedDocuments(texts, abort.signal);
       abort.signal.throwIfAborted();

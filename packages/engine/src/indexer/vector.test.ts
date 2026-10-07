@@ -74,6 +74,25 @@ afterEach(async () => {
 });
 
 describe("vector phase", () => {
+  it("passes the stored signature into the embedding header", async () => {
+    store.upsertFile(
+      { path: "a.ts", lang: "ts", size: 1, mtime: 1, contentHash: "c" },
+      [
+        { ...chunk("first piece", 0), signature: "function bigFn(a: number)" },
+        { ...chunk("second piece", 1), signature: "function bigFn(a: number)" },
+      ],
+    );
+    const emb = new FakeEmbedder({ dims: 8 });
+    const spy = vi.spyOn(emb, "embedDocuments");
+    const phase = createVectorPhase({ ctx, embCache: cache, embedder: emb });
+    phase.start();
+    await phase.whenIdle();
+    const texts = spy.mock.calls.flatMap((c) => c[0]);
+    const second = texts.find((t) => t.includes("second piece"))!;
+    expect(second).toContain("signature: function bigFn(a: number)");
+    await phase.stop();
+  });
+
   it("embeds everything, sets dims, dedups by chunk_hash", async () => {
     addFile("a.ts", ["one", "two", "one"]);
     addFile("b.ts", ["one", "three"]);

@@ -38,6 +38,7 @@ async function prepare(
       kind: c.kind,
       symbol: c.symbol,
       parentSymbol: c.parentSymbol,
+      signature: c.signature,
       chunkHash: await chunkHash(c.text),
       text: c.text,
       fts: { text: tokenizeForFts(c.text), symbol: tokenizeForFts(c.symbol ?? ""), path: pathFts },
@@ -75,12 +76,16 @@ export async function runLexical(
   const existing = new Map(store.listFiles().map((f) => [f.path, f]));
   const result: LexicalRunResult = { scanned: scanned.length, changed: 0, deleted: 0, skipped: 0, timedOut: false };
   let batch: Prepared[] = [];
+  let touches: ScannedFile[] = [];
   const flush = (): void => {
-    if (batch.length === 0) return;
+    if (batch.length === 0 && touches.length === 0) return;
     const items = batch;
+    const touched = touches;
     batch = [];
+    touches = [];
     store.transaction(() => {
       for (const p of items) store.upsertFile(p.file, p.chunks);
+      for (const f of touched) store.touchFile(f.path, f.mtimeMs, f.size);
     });
   };
 
@@ -102,7 +107,10 @@ export async function runLexical(
     } else {
       try {
         const p = await prepare(ctx, file, rec?.contentHash, full);
-        if (p === "unchanged") result.skipped++;
+        if (p === "unchanged") {
+          result.skipped++;
+          touches.push(file);
+        }
         else if (p === "skip") {
           result.skipped++;
           if (rec) {
@@ -157,6 +165,7 @@ export async function applyChanges(ctx: IndexerContext, changes: PathChanges): P
   }
 
   const prepared: Prepared[] = [];
+  const touched: ScannedFile[] = [];
   for (const abs of new Set([...changes.created, ...changes.changed])) {
     const rel = toRel(abs);
     if (!rel) continue;
@@ -169,7 +178,8 @@ export async function applyChanges(ctx: IndexerContext, changes: PathChanges): P
       const file: ScannedFile = { path: rel, absPath: abs, size: st.size, mtimeMs: st.mtimeMs, lang: detectLang(rel) };
       const p = await prepare(ctx, file, store.getFile(rel)?.contentHash, false);
       if (p === "skip") deletes.add(rel);
-      else if (p !== "unchanged") prepared.push(p);
+      else if (p === "unchanged") touched.push(file);
+      else prepared.push(p);
     } catch (e) {
       ctx.onError({ path: rel, message: errMessage(e) });
     }
@@ -180,6 +190,7 @@ export async function applyChanges(ctx: IndexerContext, changes: PathChanges): P
     for (const rel of deletes) {
       if (store.getFile(rel)) store.deleteFile(rel);
     }
+    for (const f of touched) store.touchFile(f.path, f.mtimeMs, f.size);
     for (const p of prepared) {
       store.upsertFile(p.file, p.chunks);
       changedPaths.push(p.file.path);
