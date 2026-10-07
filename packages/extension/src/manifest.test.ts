@@ -10,7 +10,7 @@ import manifest from "../package.json";
 describe("extension manifest", () => {
   it("targets workspace host and stable LM/MCP APIs", () => {
     expect(manifest.extensionKind).toEqual(["workspace"]);
-    expect(manifest.engines.vscode).toBe("^1.101.0");
+    expect(manifest.engines.vscode).toBe("^1.103.0");
     expect(manifest.main).toBe("./dist/extension.js");
     expect(manifest.activationEvents).toEqual(
       expect.arrayContaining(["onStartupFinished", "onView:codeEmbed.panel", "onCommand:codeEmbed.focus"]),

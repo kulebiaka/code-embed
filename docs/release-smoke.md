@@ -1,6 +1,6 @@
 # Release smoke checklist
 
-Automated: the `compat-smoke` workflow runs the extension in VS Code 1.101.0 (the minimum from `engines.vscode`) and stable on Linux, macOS and Windows for every `v*` tag. Locally: `pnpm build && pnpm --filter code-embed-vscode test:e2e` (`E2E_VSCODE_VERSIONS=stable` narrows the run).
+Automated: the `compat-smoke` workflow runs the extension in VS Code 1.103.0 (the minimum from `engines.vscode`) and stable on Linux, macOS and Windows for every `v*` tag. Locally: `pnpm build && pnpm --filter code-embed-vscode test:e2e` (`E2E_VSCODE_VERSIONS=stable` narrows the run).
 
 Manual: run the checklist below for each environment on every release, using the VSIX built for that environment's platform.
 
