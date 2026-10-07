@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
-import { subscribe } from "@parcel/watcher";
+import type * as ParcelWatcher from "@parcel/watcher";
 import { createIgnoreMatcher } from "../scan/scan";
 import { log } from "../util/log";
 import type { PathChanges } from "./types";
@@ -101,7 +101,14 @@ export function createAggregator(opts: {
   };
 }
 
-export async function startWatcher(opts: WatcherOptions): Promise<Watcher> {
+export async function startWatcher(opts: WatcherOptions): Promise<Watcher | null> {
+  let subscribe: typeof ParcelWatcher.subscribe;
+  try {
+    ({ subscribe } = await import("@parcel/watcher"));
+  } catch (e) {
+    log.warn(`file watcher is unavailable: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
   const root = resolve(opts.root);
   const indexDir = resolve(opts.indexDir);
   const matcher = await createIgnoreMatcher(root, opts.exclude);
