@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
-import { readEngineSettings, workspaceRoot } from "./settings";
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { projectRootOf, readEngineSettings, workspaceRoot } from "./settings";
 
 function mockConfig(sections: Record<string, Record<string, unknown>>) {
   vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation(((section: string) => ({
@@ -56,6 +59,46 @@ describe("readEngineSettings", () => {
     expect(s.providers).toBeUndefined();
     expect(s.proxy).toBeUndefined();
     expect(s.index?.exclude).toEqual([]);
+  });
+});
+
+describe("projectRootOf", () => {
+  const tree = () => mkdtempSync(join(tmpdir(), "ce-root-"));
+  it("uses the folder itself without markers", () => {
+    const t = tree();
+    mkdirSync(join(t, "a"));
+    expect(projectRootOf(join(t, "a"))).toBe(join(t, "a"));
+  });
+  it("finds .git above a monorepo subfolder", () => {
+    const t = tree();
+    mkdirSync(join(t, ".git"));
+    mkdirSync(join(t, "pkg/app"), { recursive: true });
+    expect(projectRootOf(join(t, "pkg/app"))).toBe(t);
+  });
+  it("prefers a nested .code-embed over an outer .git", () => {
+    const t = tree();
+    mkdirSync(join(t, ".git"));
+    mkdirSync(join(t, "pkg/.code-embed"), { recursive: true });
+    mkdirSync(join(t, "pkg/src"));
+    expect(projectRootOf(join(t, "pkg/src"))).toBe(join(t, "pkg"));
+  });
+  it("prefers an outer .code-embed over a nearer .git", () => {
+    const t = tree();
+    mkdirSync(join(t, ".code-embed"));
+    mkdirSync(join(t, "sub/.git"), { recursive: true });
+    expect(projectRootOf(join(t, "sub"))).toBe(t);
+  });
+  it("includes the folder itself", () => {
+    const t = tree();
+    mkdirSync(join(t, ".git"));
+    expect(projectRootOf(t)).toBe(t);
+  });
+  it("workspaceRoot resolves the first folder to its project root", () => {
+    const t = tree();
+    mkdirSync(join(t, ".git"));
+    mkdirSync(join(t, "pkg"));
+    (vscode.workspace as { workspaceFolders: unknown }).workspaceFolders = [{ uri: vscode.Uri.file(join(t, "pkg")) }];
+    expect(workspaceRoot()).toBe(t);
   });
 });
 

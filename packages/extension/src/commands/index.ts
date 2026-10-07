@@ -4,7 +4,7 @@ import type { SearchResult } from "@code-embed/protocol";
 import type { EngineClient, EngineSupervisor } from "../engine/types";
 import type { PanelController } from "../panel/types";
 import { SECTION, workspaceRoot } from "../settings";
-import { installCommand, mcpConfigJson, nodeVersionOk, run, selectionLineRange } from "./util";
+import { installCommand, mcpConfigJson, nodeVersionOk, run, resultSelection, rootRelativePath, selectionLineRange } from "./util";
 
 export interface CommandDeps {
   client: EngineClient;
@@ -110,8 +110,9 @@ async function openResult(r: SearchResult): Promise<void> {
   const root = workspaceRoot();
   const file = path.isAbsolute(r.path) || !root ? r.path : path.join(root, r.path);
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-  const range = new vscode.Range(r.range.startLine - 1, 0, r.range.endLine - 1, 0);
-  await vscode.window.showTextDocument(doc, { selection: range, preview: true });
+  const s = resultSelection(r.range, doc);
+  const selection = new vscode.Range(s.startLine, s.startCharacter, s.endLine, s.endCharacter);
+  await vscode.window.showTextDocument(doc, { selection, preview: true });
 }
 
 function quickSearch(client: EngineClient): void {
@@ -165,7 +166,12 @@ async function findSimilar(client: EngineClient, panel: PanelController): Promis
     return;
   }
   const range = selectionLineRange(editor.selection);
-  const rel = vscode.workspace.asRelativePath(editor.document.uri, false);
+  const root = workspaceRoot();
+  const rel = root ? rootRelativePath(root, editor.document.uri.fsPath) : undefined;
+  if (rel === undefined) {
+    void vscode.window.showWarningMessage("Code Embed: the file is outside the project root.");
+    return;
+  }
   const resp = await client.findSimilar({ path: rel, range });
   await panel.showSimilar(`${rel}:${range.startLine}-${range.endLine}`, resp);
 }

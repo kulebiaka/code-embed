@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { isAbsolute, relative, sep } from "node:path";
 import type * as vscode from "vscode";
 import type { LineRange } from "@code-embed/protocol";
 
@@ -33,6 +34,22 @@ export function selectionLineRange(sel: Pick<vscode.Selection, "start" | "end" |
   let endLine = sel.end.line + 1;
   if (!sel.isEmpty && sel.end.character === 0 && sel.end.line > sel.start.line) endLine -= 1;
   return { startLine, endLine };
+}
+
+export function resultSelection(
+  range: { startLine: number; endLine: number },
+  doc: { lineCount: number; lineAt(line: number): { text: string } },
+): { startLine: number; startCharacter: number; endLine: number; endCharacter: number } {
+  const last = Math.max(0, doc.lineCount - 1);
+  const endLine = Math.min(Math.max(range.endLine - 1, 0), last);
+  const startLine = Math.min(Math.max(range.startLine - 1, 0), endLine);
+  return { startLine, startCharacter: 0, endLine, endCharacter: doc.lineAt(endLine).text.length };
+}
+
+export function rootRelativePath(root: string, fsPath: string): string | undefined {
+  const rel = relative(root, fsPath);
+  if (rel === "" || rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) return undefined;
+  return rel.split(sep).join("/");
 }
 
 export function run(cmd: string, args: string[]): Promise<string> {

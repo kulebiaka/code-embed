@@ -1,4 +1,6 @@
 import type { EngineSettings } from "@code-embed/protocol";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import * as vscode from "vscode";
 
 export const SECTION = "codeEmbed";
@@ -37,7 +39,20 @@ export function readEngineSettings(): EngineSettings {
   return JSON.parse(JSON.stringify(settings)) as EngineSettings;
 }
 
+function nearestAncestor(start: string, marker: string): string | null {
+  for (let dir = start; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, marker))) return dir;
+    if (dirname(dir) === dir) return null;
+  }
+}
+
+export function projectRootOf(folder: string): string {
+  const start = resolve(folder);
+  return nearestAncestor(start, ".code-embed") ?? nearestAncestor(start, ".git") ?? start;
+}
+
 export function workspaceRoot(): string | undefined {
   const folders = vscode.workspace.workspaceFolders as readonly vscode.WorkspaceFolder[] | undefined;
-  return folders?.[0]?.uri.fsPath;
+  const first = folders?.[0]?.uri.fsPath;
+  return first === undefined ? undefined : projectRootOf(first);
 }

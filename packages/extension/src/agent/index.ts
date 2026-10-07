@@ -11,6 +11,7 @@ import {
 } from "@code-embed/protocol";
 import type { EngineClient } from "../engine/types";
 import { engineLaunch } from "../engine/paths";
+import { projectRootOf } from "../settings";
 
 function abortSignal(token: vscode.CancellationToken): AbortSignal {
   const ac = new AbortController();
@@ -75,9 +76,14 @@ export function registerMcpProvider(ctx: vscode.ExtensionContext): void {
     vscode.lm.registerMcpServerDefinitionProvider("codeEmbed.mcp", {
       onDidChangeMcpServerDefinitions: changed.event,
       provideMcpServerDefinitions() {
-        return (vscode.workspace.workspaceFolders ?? []).map((folder) => {
-          const launch = engineLaunch(ctx, ["mcp", "--root", folder.uri.fsPath]);
-          return new vscode.McpStdioServerDefinition(`Code Embed (${folder.name})`, launch.command, launch.args, launch.env);
+        const byRoot = new Map<string, string>();
+        for (const folder of vscode.workspace.workspaceFolders ?? []) {
+          const root = projectRootOf(folder.uri.fsPath);
+          if (!byRoot.has(root)) byRoot.set(root, folder.name);
+        }
+        return [...byRoot].map(([root, name]) => {
+          const launch = engineLaunch(ctx, ["mcp", "--root", root]);
+          return new vscode.McpStdioServerDefinition(`Code Embed (${name})`, launch.command, launch.args, launch.env);
         });
       },
     }),
