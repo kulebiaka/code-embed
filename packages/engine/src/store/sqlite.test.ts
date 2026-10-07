@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { IndexCorruptError } from "../errors";
+import { openDatabase } from "./driver";
 import { openIndexStore } from "./sqlite";
 import type { ChunkInput, IndexStore } from "./types";
 
@@ -177,6 +178,66 @@ describe("corruption and readonly", () => {
     store.upsertFile(file("b.ts"), [chunk("world", "", "b.ts")]);
     expect(ro.searchFts("world", 5)).toHaveLength(1);
     expect(ro.counts().files).toBe(2);
+    ro.close();
+  });
+});
+
+describe("signature and touchFile", () => {
+  it("round-trips signature and defaults to null", () => {
+    const withSig = { ...chunk("alpha", "", "a.ts", 0), signature: "function alpha(x: number)" };
+    const { chunkIds } = store.upsertFile(file("a.ts"), [withSig, chunk("beta", "", "a.ts", 1)]);
+    expect(store.chunksForFile("a.ts").map((c) => c.signature)).toEqual(["function alpha(x: number)", null]);
+    expect(store.getChunks(chunkIds).map((c) => c.signature)).toEqual(["function alpha(x: number)", null]);
+    expect(store.pendingChunks(10).map((c) => c.signature)).toEqual(["function alpha(x: number)", null]);
+  });
+
+  it("touchFile updates only mtime, size and indexed_at", () => {
+    store.setVectorDims(2);
+    const { chunkIds } = store.upsertFile(file("a.ts"), [chunk("alpha", "", "a.ts")]);
+    store.setEmbeddings([{ chunkId: chunkIds[0]!, vector: vec(1, 2) }]);
+    const before = store.getFile("a.ts")!;
+    const chunksBefore = store.chunksForFile("a.ts");
+    store.touchFile("a.ts", 99, 1234);
+    const after = store.getFile("a.ts")!;
+    expect(after).toMatchObject({ mtime: 99, size: 1234, contentHash: before.contentHash, lang: before.lang, id: before.id });
+    expect(after.indexedAt).toBeGreaterThanOrEqual(before.indexedAt);
+    expect(store.chunksForFile("a.ts")).toEqual(chunksBefore);
+    expect(store.searchFts("alpha", 5)).toHaveLength(1);
+    expect(store.getVectors(chunkIds).get(chunkIds[0]!)).toEqual(vec(1, 2));
+    expect(store.counts().embedded).toBe(1);
+    expect(() => store.touchFile("missing.ts", 1, 1)).not.toThrow();
+    expect(store.getFile("missing.ts")).toBeUndefined();
+  });
+
+  it("reads an old-schema index read-only with signature null", () => {
+    const old = join(dir, "old.db");
+    const db = openDatabase(old, false);
+    db.exec(`
+      CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, lang TEXT, size INTEGER NOT NULL, mtime REAL NOT NULL, content_hash TEXT NOT NULL, indexed_at INTEGER NOT NULL);
+      CREATE TABLE chunks (
+        id INTEGER PRIMARY KEY,
+        file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+        start_line INTEGER NOT NULL,
+        end_line INTEGER NOT NULL,
+        start_byte INTEGER NOT NULL,
+        end_byte INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        symbol TEXT,
+        parent_symbol TEXT,
+        chunk_hash TEXT NOT NULL,
+        text TEXT NOT NULL,
+        embedded INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO files VALUES (1, 'a.ts', 'ts', 10, 1, 'c', 1);
+      INSERT INTO chunks(id, file_id, start_line, end_line, start_byte, end_byte, kind, symbol, parent_symbol, chunk_hash, text)
+        VALUES (1, 1, 1, 2, 0, 9, 'function', 'a', NULL, 'h', 'old text');
+    `);
+    db.close();
+    const ro = openIndexStore(old, { readonly: true });
+    expect(ro.getChunks([1])[0]).toMatchObject({ text: "old text", signature: null });
+    expect(ro.chunksForFile("a.ts")[0]!.signature).toBeNull();
+    expect(ro.pendingChunks(5)[0]!.signature).toBeNull();
     ro.close();
   });
 });

@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   kind TEXT NOT NULL,
   symbol TEXT,
   parent_symbol TEXT,
+  signature TEXT,
   chunk_hash TEXT NOT NULL,
   text TEXT NOT NULL,
   embedded INTEGER NOT NULL DEFAULT 0
@@ -45,8 +46,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, symbol, path, tok
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `;
 
-const CHUNK_SELECT = `SELECT c.id, c.file_id, f.path, f.lang, c.start_line, c.end_line, c.start_byte, c.end_byte,
-  c.kind, c.symbol, c.parent_symbol, c.chunk_hash, c.text, c.embedded
+const chunkSelect = (hasSignature: boolean): string => `SELECT c.id, c.file_id, f.path, f.lang, c.start_line, c.end_line, c.start_byte, c.end_byte,
+  c.kind, c.symbol, c.parent_symbol, ${hasSignature ? "c.signature" : "NULL AS signature"}, c.chunk_hash, c.text, c.embedded
   FROM chunks c JOIN files f ON f.id = c.file_id`;
 
 function fileRecord(r: Row): FileRecord {
@@ -74,6 +75,7 @@ function chunkRecord(r: Row): ChunkRecord {
     kind: r.kind,
     symbol: r.symbol,
     parentSymbol: r.parent_symbol,
+    signature: r.signature ?? null,
     chunkHash: r.chunk_hash,
     text: r.text,
     embedded: r.embedded === 1,
@@ -126,11 +128,14 @@ class SqliteStore implements IndexStore {
   dims: number | null = null;
   private depth = 0;
   private hasVec: boolean;
+  private chunkSql: string;
 
   constructor(
     private db: Db,
     readonly readonly: boolean,
   ) {
+    const cols = db.prepare("PRAGMA table_info(chunks)").all();
+    this.chunkSql = chunkSelect(cols.some((c) => c.name === "signature"));
     this.hasVec = !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'chunks_vec'").get();
     const d = this.getMeta("vec_dims");
     this.dims = this.hasVec && d ? Number(d) : null;
@@ -192,8 +197,8 @@ class SqliteStore implements IndexStore {
         fileId = Number(res.lastInsertRowid);
       }
       const insChunk = this.db.prepare(
-        `INSERT INTO chunks(file_id, start_line, end_line, start_byte, end_byte, kind, symbol, parent_symbol, chunk_hash, text)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO chunks(file_id, start_line, end_line, start_byte, end_byte, kind, symbol, parent_symbol, signature, chunk_hash, text)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const insFts = this.db.prepare("INSERT INTO chunks_fts(rowid, text, symbol, path) VALUES (?, ?, ?, ?)");
       const chunkIds: number[] = [];
@@ -207,6 +212,7 @@ class SqliteStore implements IndexStore {
           c.kind,
           c.symbol,
           c.parentSymbol,
+          c.signature ?? null,
           c.chunkHash,
           c.text,
         );
@@ -216,6 +222,10 @@ class SqliteStore implements IndexStore {
       }
       return { fileId, chunkIds };
     });
+  }
+
+  touchFile(path: string, mtime: number, size: number): void {
+    this.db.prepare("UPDATE files SET mtime = ?, size = ?, indexed_at = ? WHERE path = ?").run(mtime, size, Date.now(), path);
   }
 
   deleteFile(path: string): void {
@@ -231,20 +241,20 @@ class SqliteStore implements IndexStore {
     const out: ChunkRecord[] = [];
     for (let i = 0; i < ids.length; i += 500) {
       const part = ids.slice(i, i + 500);
-      out.push(...this.db.prepare(`${CHUNK_SELECT} WHERE c.id IN (${placeholders(part.length)})`).all(...part).map(chunkRecord));
+      out.push(...this.db.prepare(`${this.chunkSql} WHERE c.id IN (${placeholders(part.length)})`).all(...part).map(chunkRecord));
     }
     return out;
   }
 
   chunksForFile(path: string): ChunkRecord[] {
-    return this.db.prepare(`${CHUNK_SELECT} WHERE f.path = ? ORDER BY c.start_byte, c.id`).all(path).map(chunkRecord);
+    return this.db.prepare(`${this.chunkSql} WHERE f.path = ? ORDER BY c.start_byte, c.id`).all(path).map(chunkRecord);
   }
 
   pendingChunks(limit: number, paths?: string[]): ChunkRecord[] {
     if (paths && paths.length === 0) return [];
     const pathSql = paths ? ` AND f.path IN (${placeholders(paths.length)})` : "";
     return this.db
-      .prepare(`${CHUNK_SELECT} WHERE c.embedded = 0${pathSql} ORDER BY c.id LIMIT ?`)
+      .prepare(`${this.chunkSql} WHERE c.embedded = 0${pathSql} ORDER BY c.id LIMIT ?`)
       .all(...(paths ?? []), limit)
       .map(chunkRecord);
   }

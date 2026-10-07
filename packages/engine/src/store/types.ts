@@ -18,6 +18,7 @@ export interface ChunkInput {
   kind: string;
   symbol: string | null;
   parentSymbol: string | null;
+  signature?: string | null;
   chunkHash: string;
   text: string;
   // Already pre-tokenized with lex/tokenizeForFts.
@@ -25,6 +26,7 @@ export interface ChunkInput {
 }
 
 export interface ChunkRecord extends Omit<ChunkInput, "fts"> {
+  signature: string | null;
   id: number;
   fileId: number;
   path: string;
@@ -56,6 +58,7 @@ export interface IndexStore {
   getFile(path: string): FileRecord | undefined;
   listFiles(): FileRecord[];
   upsertFile(file: FileInput, chunks: ChunkInput[]): { fileId: number; chunkIds: number[] };
+  touchFile(path: string, mtime: number, size: number): void;
   deleteFile(path: string): void;
   getChunks(ids: number[]): ChunkRecord[];
   chunksForFile(path: string): ChunkRecord[];

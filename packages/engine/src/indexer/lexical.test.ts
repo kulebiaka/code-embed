@@ -1,5 +1,5 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EffectiveSettings } from "../config/types";
@@ -7,6 +7,7 @@ import { DEFAULT_CHUNK_OPTIONS } from "../chunk/types";
 import { openIndexStore } from "../store/sqlite";
 import type { IndexStore } from "../store/types";
 import { initHashing } from "../util/hash";
+import * as scanRead from "../scan/read";
 import { applyChanges, runLexical } from "./lexical";
 import type { IndexerContext } from "./types";
 
@@ -101,6 +102,45 @@ describe("runLexical", () => {
     utimesSync(join(root, "a.ts"), t, t);
     const r = await runLexical(ctx());
     expect(r).toMatchObject({ changed: 0, skipped: 1 });
+  });
+
+  it("touches mtime on hash match so the next pass does not read the file", async () => {
+    write("a.ts", "export const a = 1;\n");
+    await runLexical(ctx());
+    const t = new Date(Date.now() + 60_000);
+    utimesSync(join(root, "a.ts"), t, t);
+    const mtime = statSync(join(root, "a.ts")).mtimeMs;
+    const touchSpy = vi.spyOn(store, "touchFile");
+    const readSpy = vi.spyOn(scanRead, "readCandidate");
+    await runLexical(ctx());
+    expect(touchSpy).toHaveBeenCalledWith("a.ts", mtime, 20);
+    expect(readSpy).toHaveBeenCalledTimes(1);
+    expect(store.getFile("a.ts")?.mtime).toBe(mtime);
+    readSpy.mockClear();
+    const r = await runLexical(ctx());
+    expect(readSpy).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ changed: 0, skipped: 1 });
+    readSpy.mockRestore();
+  });
+
+  it("applyChanges touches mtime on hash match", async () => {
+    write("a.ts", "export const a = 1;\n");
+    await runLexical(ctx());
+    const t = new Date(Date.now() + 120_000);
+    utimesSync(join(root, "a.ts"), t, t);
+    const out = await applyChanges(ctx(), { created: [], changed: [join(root, "a.ts")], deleted: [] });
+    expect(out.changedPaths).toEqual([]);
+    expect(store.getFile("a.ts")?.mtime).toBe(statSync(join(root, "a.ts")).mtimeMs);
+  });
+
+  it("stores the signature on every piece of a split function", async () => {
+    const body = Array.from({ length: 60 }, (_, i) => `  total += compute(${i}) * factor${i};`).join("\n");
+    write("a.ts", `export function bigFunction(factor: number): number {\n  let total = 0;\n${body}\n  return total;\n}\n`);
+    const c = { ...ctx(), chunkOptions: { ...DEFAULT_CHUNK_OPTIONS, maxTokens: 60 } };
+    await runLexical(c);
+    const chunks = store.chunksForFile("a.ts");
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const ch of chunks) expect(ch.signature).toContain("bigFunction");
   });
 
   it("stops by budget", async () => {
