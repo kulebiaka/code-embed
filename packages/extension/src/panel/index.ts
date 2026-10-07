@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 import * as vscode from "vscode";
 import type { SearchMode, SearchResponse } from "@code-embed/protocol/rpc";
+import { resultSelection } from "../commands/util";
+import { workspaceRoot } from "../settings";
 import type { EngineClient } from "../engine/types";
 import type { HostToWebview, WebviewToHost } from "./messages";
 import type { PanelController } from "./types";
@@ -122,11 +124,12 @@ export class PanelProvider implements vscode.WebviewViewProvider, PanelControlle
   }
 
   private async open(path: string, range: { startLine: number; endLine: number }): Promise<void> {
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    const uri = isAbsolute(path) || !folder ? vscode.Uri.file(path) : vscode.Uri.joinPath(folder.uri, path);
+    const root = workspaceRoot();
+    const uri = isAbsolute(path) || !root ? vscode.Uri.file(path) : vscode.Uri.file(join(root, path));
     const doc = await vscode.workspace.openTextDocument(uri);
-    const sel = new vscode.Range(range.startLine - 1, 0, range.endLine, 0);
-    await vscode.window.showTextDocument(doc, { selection: sel, preview: true });
+    const s = resultSelection(range, doc);
+    const selection = new vscode.Range(s.startLine, s.startCharacter, s.endLine, s.endCharacter);
+    await vscode.window.showTextDocument(doc, { selection, preview: true });
   }
 
   private abortAll(): void {

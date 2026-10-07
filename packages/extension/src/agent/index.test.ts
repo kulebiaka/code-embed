@@ -11,6 +11,9 @@ vi.mock("../engine/paths", () => ({
   })),
 }));
 
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { registerAgentTools, registerMcpProvider } from "./index";
 
 type Tool = {
@@ -114,5 +117,30 @@ describe("registerMcpProvider", () => {
     expect(defs[0]!.env.ELECTRON_RUN_AS_NODE).toBe("1");
     expect(defs[1]!.args.slice(-1)).toEqual(["/w/two"]);
     ws.workspaceFolders = undefined;
+  });
+
+  it("uses the project root and dedupes folders sharing it", () => {
+    type Def = { label: string; args: string[] };
+    let provider: { provideMcpServerDefinitions(): Def[] } | undefined;
+    vi.spyOn(vscode.lm, "registerMcpServerDefinitionProvider").mockImplementation(((_id: string, p: typeof provider) => {
+      provider = p;
+      return { dispose() {} };
+    }) as never);
+    const repo = mkdtempSync(join(tmpdir(), "ce-mcp-"));
+    mkdirSync(join(repo, ".git"));
+    mkdirSync(join(repo, "a"));
+    mkdirSync(join(repo, "b"));
+    const ws = vscode.workspace as unknown as Record<string, unknown>;
+    ws.onDidChangeWorkspaceFolders = vi.fn(() => ({ dispose() {} }));
+    ws.workspaceFolders = [
+      { name: "a", uri: vscode.Uri.file(join(repo, "a")) },
+      { name: "b", uri: vscode.Uri.file(join(repo, "b")) },
+    ];
+    registerMcpProvider(ctx());
+    const defs = provider!.provideMcpServerDefinitions();
+    ws.workspaceFolders = undefined;
+    expect(defs).toHaveLength(1);
+    expect(defs[0]!.label).toBe("Code Embed (a)");
+    expect(defs[0]!.args.slice(-2)).toEqual(["--root", repo]);
   });
 });

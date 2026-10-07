@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
 import type { SearchResponse } from "@code-embed/protocol/rpc";
@@ -112,13 +115,20 @@ describe("panel host", () => {
 
   it("opens a file with the selected range", async () => {
     const t = setup();
-    const doc = {};
-    vi.spyOn(vscode.workspace, "workspaceFolders", "get").mockReturnValue([{ uri: vscode.Uri.file("/root") }] as never);
+    const doc = { lineCount: 0, lineAt: (_n: number) => ({ text: "" }) };
+    const repo = mkdtempSync(join(tmpdir(), "ce-panel-"));
+    mkdirSync(join(repo, ".git"));
+    mkdirSync(join(repo, "pkg"));
+    vi.spyOn(vscode.workspace, "workspaceFolders", "get").mockReturnValue([{ uri: vscode.Uri.file(join(repo, "pkg")) }] as never);
+    const lines = ["l1", "l2", "line three", "l4", "line five", "l6"];
+    doc.lineCount = lines.length;
+    doc.lineAt = (n: number) => ({ text: lines[n]! });
     const openDoc = vi.spyOn(vscode.workspace, "openTextDocument").mockResolvedValue(doc as never);
     const show = vi.spyOn(vscode.window, "showTextDocument").mockResolvedValue(undefined as never);
     await t.send({ type: "open", path: "src/a.ts", range: { startLine: 3, endLine: 5, startByte: 0, endByte: 1 } });
-    expect((openDoc.mock.calls[0]![0] as vscode.Uri).path).toBe("/root/src/a.ts");
+    expect((openDoc.mock.calls[0]![0] as vscode.Uri).path).toBe(join(repo, "src/a.ts"));
     const opts = show.mock.calls[0]![1] as { selection: vscode.Range };
-    expect([opts.selection.start.line, opts.selection.end.line]).toEqual([2, 5]);
+    expect([opts.selection.start.line, opts.selection.start.character]).toEqual([2, 0]);
+    expect([opts.selection.end.line, opts.selection.end.character]).toEqual([4, 9]);
   });
 });
