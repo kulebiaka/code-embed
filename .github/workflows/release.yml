@@ -1,0 +1,147 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  TARGET_MATRIX: >-
+    [
+      { "target": "win32-x64", "os": "windows-2022" },
+      { "target": "win32-arm64", "os": "windows-11-arm" },
+      { "target": "darwin-x64", "os": "macos-13" },
+      { "target": "darwin-arm64", "os": "macos-14" },
+      { "target": "linux-x64", "os": "ubuntu-22.04" },
+      { "target": "linux-arm64", "os": "ubuntu-22.04-arm" }
+    ]
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.m.outputs.include }}
+    steps:
+      - id: m
+        run: echo "include=$(echo "$TARGET_MATRIX" | jq -c .)" >> "$GITHUB_OUTPUT"
+
+  stage0:
+    name: stage0 ${{ matrix.target }}
+    needs: matrix
+    strategy:
+      fail-fast: true
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      STAGE0_REPORT_DIR: ${{ github.workspace }}/stage0-reports
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm stage0
+      - name: Electron (Linux, xvfb)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libgbm1 libasound2 libgtk-3-0
+          xvfb-run -a pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts
+      - name: Electron
+        if: runner.os != 'Linux'
+        run: pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stage0-${{ matrix.target }}
+          path: stage0-reports/*.json
+          if-no-files-found: warn
+
+  vsix:
+    name: vsix ${{ matrix.target }}
+    needs: [matrix, stage0]
+    strategy:
+      fail-fast: true
+      matrix:
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: node packages/extension/scripts/package.mjs --target ${{ matrix.target }}
+      - run: node scripts/check-vsix-size.mjs packages/extension/dist-vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: packages/extension/dist-vsix/*.vsix
+          if-no-files-found: error
+
+  publish:
+    needs: vsix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          path: release
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: release
+        run: sha256sum *.vsix > SHA256SUMS
+      - name: Check tag matches versions
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          test "$(node -p "require('./packages/engine/package.json').version")" = "$v"
+          test "$(node -p "require('./packages/extension/package.json').version")" = "$v"
+      - name: npm publish
+        working-directory: packages/engine
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # the protocol package is bundled into dist/cli.js and is not published
+          npm pkg delete dependencies.@code-embed/protocol
+          cp ../../LICENSE .
+          npm publish
+      - name: Visual Studio Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: pnpm --filter code-embed-vscode exec vsce publish --packagePath $(ls "$GITHUB_WORKSPACE"/release/*.vsix)
+      - name: Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          for f in release/*.vsix; do
+            pnpm --filter code-embed-vscode exec ovsx publish "$GITHUB_WORKSPACE/$f" -p "$OVSX_PAT"
+          done
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/*.vsix release/SHA256SUMS --title "$GITHUB_REF_NAME" --generate-notes
