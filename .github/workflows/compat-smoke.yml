@@ -1,0 +1,41 @@
+name: compat-smoke
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vscode:
+    name: vscode ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Electron dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libgbm1 libasound2 libgtk-3-0
+      - name: E2E (Linux, xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm --filter code-embed-vscode test:e2e
+      - name: E2E
+        if: runner.os != 'Linux'
+        run: pnpm --filter code-embed-vscode test:e2e
