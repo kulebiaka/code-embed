@@ -82,6 +82,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
 
   const nap = (ms: number) =>
     new Promise<void>((resolve) => {
+      if (stopped) return resolve();
       const t = Number.isFinite(ms) ? setTimeout(done, ms) : null;
       function done() {
         if (t) clearTimeout(t);
@@ -131,6 +132,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
         return buildEmbeddingText({ ...r, signature: null }, { path: r.path, lang: r.lang });
       });
       const out = await embedder.embedDocuments(texts, abort.signal);
+      abort.signal.throwIfAborted();
       if (out.length !== missing.length) throw new Error(`embedder returned ${out.length} vectors for ${missing.length} texts`);
       const fresh = missing.map((chunkHash, i) => ({ chunkHash, vector: out[i]! }));
       embCache.put(modelId, fresh);
@@ -145,6 +147,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
 
   const prepare = async () => {
     await embedder.init(abort.signal);
+    abort.signal.throwIfAborted();
     if (ctx.store.dims !== embedder.info.dims) ctx.store.setVectorDims(embedder.info.dims);
     dimsReady = true;
   };
@@ -155,7 +158,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
     let backoff = BACKOFF_START_MS;
     let batteryAt = 0;
     let onBattery = false;
-    setState(paused ? "paused" : "running");
+    await Promise.resolve();
     try {
       gitRecent ??= await recentlyChangedPaths(root);
       for (;;) {
@@ -171,6 +174,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
           if (Date.now() - batteryAt > BATTERY_POLL_MS || onBattery) {
             onBattery = await isOnBattery();
             batteryAt = Date.now();
+            if (stopped) break;
           }
           if (onBattery) {
             flush();
@@ -213,7 +217,11 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
       if (prevPriority !== undefined) safe(() => setPriority(0, prevPriority));
       loop = null;
       setState(paused && !stopped ? "paused" : "idle");
-      progress(state === "paused" ? "paused" : "idle");
+      try {
+        progress(state === "paused" ? "paused" : "idle");
+      } catch (err) {
+        log.error(`vector progress failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
       if (state === "idle") {
         const waiters = idleWaiters;
         idleWaiters = [];
@@ -224,7 +232,10 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
 
   const kick = () => {
     if (!started || stopped || loop) return;
-    loop = run();
+    setState(paused ? "paused" : "running");
+    loop = run().catch((err) => {
+      log.error(`vector loop crashed: ${err instanceof Error ? err.message : String(err)}`);
+    });
   };
 
   return {
@@ -246,11 +257,11 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
     },
     pause() {
       paused = true;
-      if (!loop) setState("paused");
+      if (!loop && !stopped) setState("paused");
     },
     resume() {
       paused = false;
-      if (state === "paused" && !loop) setState("idle");
+      if (state === "paused" && !loop && !stopped) setState("idle");
       wake?.();
       kick();
     },
