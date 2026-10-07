@@ -10,7 +10,7 @@ const extDir = join(here, "..", "..");
 const engineDir = join(extDir, "..", "engine");
 const fixture = join(engineDir, "test", "fixtures", "sample-repo");
 
-const versions = (process.env.E2E_VSCODE_VERSIONS ?? "1.101.0,stable")
+const versions = (process.env.E2E_VSCODE_VERSIONS ?? "1.103.0,stable")
   .split(",")
   .map((v) => v.trim())
   .filter(Boolean);
