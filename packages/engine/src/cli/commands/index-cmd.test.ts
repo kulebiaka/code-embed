@@ -5,8 +5,15 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EXIT, type CliIO } from "../types";
+import { ErrorCodes } from "@code-embed/protocol";
+import { openForCli } from "../open";
 import { run } from "./index-cmd";
 import { run as status } from "./status";
+
+vi.mock("../open", async (importActual) => {
+  const actual = await importActual<typeof import("../open")>();
+  return { ...actual, openForCli: vi.fn(actual.openForCli) };
+});
 
 const FIXTURE = fileURLToPath(new URL("../../../test/fixtures/sample-repo", import.meta.url));
 
@@ -84,5 +91,41 @@ describe("index command", () => {
     const t = makeIO();
     expect(await run(["--nope"], t.io)).toBe(EXIT.ERROR);
     expect(t.err()).toContain("code-embed:");
+  });
+});
+
+describe("index command via daemon", () => {
+  function fakeDaemon(rebuild: () => Promise<unknown>) {
+    const opened = {
+      viaDaemon: true,
+      api: {
+        rebuild,
+        status: async () => ({ phase: "idle", files: 3, chunks: 5, embedded: 5 }),
+        onProgress: () => ({ dispose() {} }),
+        grantConsent: async () => undefined,
+      },
+      close: async () => {},
+    };
+    vi.mocked(openForCli).mockResolvedValueOnce({ root: tmp, opened } as never);
+  }
+
+  it.each([null, undefined])("treats a successful %s rebuild response as success", async (value) => {
+    fakeDaemon(async () => value);
+    const t = makeIO();
+    expect(await run([], t.io)).toBe(EXIT.OK);
+    expect(t.err()).toContain("indexed 3 files, 5 chunks, vectors 5/5");
+  });
+
+  it("still fails when consent is required and not granted", async () => {
+    fakeDaemon(async () => {
+      throw Object.assign(new Error("consent required"), {
+        code: ErrorCodes.ConsentRequired,
+        data: { host: "api.example.com" },
+      });
+    });
+    const t = makeIO();
+    expect(await run([], t.io)).toBe(EXIT.ERROR);
+    expect(t.err()).toContain("--allow-remote");
+    expect(t.err()).not.toContain("indexed");
   });
 });
