@@ -12,7 +12,10 @@ export interface LocalEmbedderOptions {
   proxy?: string;
 }
 
-const BATCH_SIZE = 16;
+export const LOCAL_MAX_INPUT_TOKENS = 1024;
+export const MAX_SUB_BATCH = 16;
+export const BATCH_TOKEN_BUDGET = 1024;
+export const BATCH_ATTENTION_BUDGET = 1_048_576;
 
 export function formatQuery(entry: ModelEntry, query: string): string {
   return `${entry.queryInstruction ?? entry.queryPrefix ?? ""}${query}`;
@@ -37,6 +40,26 @@ function truncate(v: Float32Array, dims: number): Float32Array {
 interface TensorLike {
   data: ArrayLike<number>;
   dims: number[];
+  dispose?: () => void;
+}
+
+export function planSubBatches(lengths: number[]): number[][] {
+  const order = lengths.map((_, i) => i).sort((a, b) => lengths[a]! - lengths[b]! || a - b);
+  const groups: number[][] = [];
+  let cur: number[] = [];
+  for (const idx of order) {
+    const count = cur.length + 1;
+    const maxLen = lengths[idx]!;
+    const fits =
+      count <= MAX_SUB_BATCH && count * maxLen <= BATCH_TOKEN_BUDGET && count * maxLen * maxLen <= BATCH_ATTENTION_BUDGET;
+    if (!fits && cur.length > 0) {
+      groups.push(cur);
+      cur = [];
+    }
+    cur.push(idx);
+  }
+  if (cur.length > 0) groups.push(cur);
+  return groups;
 }
 
 function pool(mode: ModelEntry["pooling"], hidden: TensorLike, mask: TensorLike): Float32Array[] {
@@ -77,6 +100,21 @@ function rows(t: TensorLike): Float32Array[] {
   return out;
 }
 
+interface OrtSession {
+  outputNames: string[];
+  run: (feed: unknown, fetches?: string[]) => Promise<unknown>;
+}
+
+// decoder-style ONNX exports also emit present.* KV tensors (~1 GB per 4k tokens for qwen3) that pooling never reads
+function restrictOutputs(model: Model): void {
+  const session = (model as unknown as { sessions?: Record<string, OrtSession> }).sessions?.["model"];
+  if (!session) return;
+  const wanted = ["sentence_embedding", "last_hidden_state"].filter((n) => session.outputNames.includes(n));
+  if (wanted.length === 0) return;
+  const run = session.run.bind(session);
+  session.run = (feed, fetches) => run(feed, fetches ?? wanted);
+}
+
 type Tokenizer = Awaited<ReturnType<typeof AutoTokenizer.from_pretrained>>;
 type Model = Awaited<ReturnType<typeof AutoModel.from_pretrained>>;
 
@@ -87,14 +125,15 @@ export function createLocalEmbedder(entry: ModelEntry, opts: LocalEmbedderOption
       `model "${entry.id}" does not support dims=${dims} (supported: ${[entry.dims, ...(entry.mrlDims ?? [])].join(", ")})`,
     );
   }
+  const maxTokens = Math.min(entry.maxTokens, LOCAL_MAX_INPUT_TOKENS);
   const info: EmbedderInfo = {
     provider: "local",
     model: entry.id,
     dims,
     modelId: modelIdOf("local", entry.id, dims),
     remote: false,
-    maxInputTokens: entry.maxTokens,
-    batchSize: BATCH_SIZE,
+    maxInputTokens: maxTokens,
+    batchSize: MAX_SUB_BATCH,
   };
 
   let tokenizer: Tokenizer | undefined;
@@ -121,8 +160,15 @@ export function createLocalEmbedder(entry: ModelEntry, opts: LocalEmbedderOption
     const plain = entry.files.some((f) => f.path.endsWith("/model.onnx"));
     model = await AutoModel.from_pretrained(entry.id, {
       dtype: plain ? "fp32" : entry.dtype,
-      session_options: { intraOpNumThreads: opts.threads, interOpNumThreads: 1 },
+      session_options: {
+        intraOpNumThreads: opts.threads,
+        interOpNumThreads: 1,
+        enableCpuMemArena: false,
+        enableMemPattern: false,
+        extra: { session: { disable_prepacking: "1" } },
+      },
     });
+    restrictOutputs(model);
   }
 
   function ensureInit(signal?: AbortSignal): Promise<void> {
@@ -133,24 +179,38 @@ export function createLocalEmbedder(entry: ModelEntry, opts: LocalEmbedderOption
     return initPromise;
   }
 
+  async function embedBatch(batch: string[]): Promise<Float32Array[]> {
+    const inputs = tokenizer!(batch, { padding: true, truncation: true, max_length: maxTokens });
+    const outputs = (await model!(inputs)) as unknown as Record<string, TensorLike>;
+    try {
+      const pooled = outputs["sentence_embedding"];
+      return pooled
+        ? rows(pooled)
+        : pool(entry.pooling, outputs["last_hidden_state"]!, inputs.attention_mask as unknown as TensorLike);
+    } finally {
+      for (const t of Object.values(outputs)) t?.dispose?.();
+    }
+  }
+
   async function run(texts: string[], signal?: AbortSignal): Promise<Float32Array[]> {
     await ensureInit(signal);
-    const out: Float32Array[] = [];
-    for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-      signal?.throwIfAborted();
-      const batch = texts.slice(i, i + BATCH_SIZE);
-      let vecs: Float32Array[];
-      if (staticModel) {
-        vecs = staticModel.embed(batch);
-      } else {
-        const inputs = tokenizer!(batch, { padding: true, truncation: true, max_length: entry.maxTokens });
-        const outputs = (await model!(inputs)) as unknown as Record<string, TensorLike>;
-        const pooled = outputs["sentence_embedding"];
-        vecs = pooled
-          ? rows(pooled)
-          : pool(entry.pooling, outputs["last_hidden_state"]!, inputs.attention_mask as unknown as TensorLike);
+    const out: Float32Array[] = new Array(texts.length);
+    if (staticModel) {
+      for (let i = 0; i < texts.length; i += MAX_SUB_BATCH) {
+        signal?.throwIfAborted();
+        staticModel.embed(texts.slice(i, i + MAX_SUB_BATCH)).forEach((v, j) => (out[i + j] = truncate(v, dims)));
       }
-      for (const v of vecs) out.push(truncate(v, dims));
+      return out;
+    }
+    const lengths = texts.map((t) => {
+      signal?.throwIfAborted();
+      const enc = tokenizer!([t], { truncation: true, max_length: maxTokens });
+      return Number((enc.input_ids as unknown as TensorLike).dims.at(-1));
+    });
+    for (const group of planSubBatches(lengths)) {
+      signal?.throwIfAborted();
+      const vecs = await embedBatch(group.map((i) => texts[i]!));
+      group.forEach((i, j) => (out[i] = truncate(vecs[j]!, dims)));
     }
     return out;
   }
