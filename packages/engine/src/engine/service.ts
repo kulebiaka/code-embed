@@ -47,7 +47,7 @@ import { type VectorPhase, createVectorPhase } from "../indexer/vector";
 import { type Watcher, startWatcher } from "../indexer/watcher";
 import { search } from "../search/hybrid";
 import { findSimilar } from "../search/similar";
-import type { SearchContext } from "../search/types";
+import { INDEXING_EMBED_TIMEOUT_MS, type SearchContext } from "../search/types";
 import { initHashing } from "../util/hash";
 import { log, setLogSink } from "../util/log";
 import { throttleLatest } from "./throttle";
@@ -235,6 +235,8 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
     modelId: embedder?.info.modelId ?? meta.model_id,
     vectorsReady,
     embedderError,
+    embedTimeoutMs:
+      vector && (vector.state === "running" || vector.state === "waiting-provider") ? INDEXING_EMBED_TIMEOUT_MS : undefined,
   });
 
   setupVector();
