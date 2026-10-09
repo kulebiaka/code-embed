@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   const n = Number(arg("texts") ?? 512);
   const threads = Number(arg("threads") ?? Math.max(1, Math.floor(availableParallelism() / 2)));
   const budgetMb = Number(
-    arg("budget-mb") ?? (modelId === "qwen3-embedding-0.6b" ? 1280 : modelId === "bge-m3" ? 1024 : 700),
+    arg("budget-mb") ?? (modelId === "qwen3-embedding-0.6b" ? 2200 : modelId === "bge-m3" ? 1024 : 700),
   );
   const emb = createLocalEmbedder(getModel(modelId), { modelsDir: modelsDir(), threads });
   await emb.init();
