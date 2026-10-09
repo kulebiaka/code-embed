@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { runEmbedWorker } from "../embed/worker-child";
 import { SERVER_VERSION } from "../engine/service";
 import { log } from "../util/log";
 import { parseSearchArgs, USAGE } from "./args";
@@ -37,6 +38,14 @@ const COMMANDS: Record<string, CommandRun> = {
 
 export async function main(argv: string[], io: CliIO): Promise<number> {
   const first = argv[0];
+  if (first === "__embed-worker") {
+    if (process.send === undefined) {
+      io.stderr.write("__embed-worker requires an IPC channel\n");
+      return EXIT.ERROR;
+    }
+    await runEmbedWorker();
+    process.exit(EXIT.OK);
+  }
   if (first !== undefined && Object.hasOwn(COMMANDS, first)) {
     return COMMANDS[first]!(argv.slice(1), io);
   }

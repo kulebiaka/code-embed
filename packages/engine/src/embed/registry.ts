@@ -9,6 +9,7 @@ import { createLocalEmbedder } from "./local";
 import { withQueryCache } from "./lru";
 import { createOpenAIEmbedder } from "./openai";
 import type { Embedder } from "./types";
+import { createWorkerEmbedder } from "./worker";
 
 export function isLoopbackUrl(url: string): boolean {
   if (/^(unix|http\+unix):/i.test(url)) return true;
@@ -34,13 +35,15 @@ export async function resolveEmbedder(opts: ResolveEmbedderOptions): Promise<Emb
     return withQueryCache(new FakeEmbedder({ dims }));
   }
   if (settings.provider === "local") {
+    const entry = getModel(settings.model);
+    const localOpts = {
+      modelsDir: modelsDir(),
+      threads: settings.threads,
+      offlineArchive: settings.offlineArchive,
+      proxy: settings.proxy,
+    };
     return withQueryCache(
-      createLocalEmbedder(getModel(settings.model), {
-        modelsDir: modelsDir(),
-        threads: settings.threads,
-        offlineArchive: settings.offlineArchive,
-        proxy: settings.proxy,
-      }),
+      entry.pooling === "static" ? createLocalEmbedder(entry, localOpts) : createWorkerEmbedder(entry, localOpts),
     );
   }
   const name = settings.provider;
