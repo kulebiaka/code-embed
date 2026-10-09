@@ -8,12 +8,14 @@ import { ConsentRequiredError } from "../errors";
 import { FakeEmbedder } from "./fake";
 
 vi.mock("./local", () => ({ createLocalEmbedder: vi.fn() }));
+vi.mock("./worker", () => ({ createWorkerEmbedder: vi.fn() }));
 vi.mock("./openai", () => ({ createOpenAIEmbedder: vi.fn() }));
 vi.mock("./keys", () => ({ resolveApiKey: vi.fn(async () => "k") }));
 
 import { resolveApiKey } from "./keys";
 import { createLocalEmbedder } from "./local";
 import { createOpenAIEmbedder } from "./openai";
+import { createWorkerEmbedder } from "./worker";
 import { describeProvider, isLoopbackUrl, resolveEmbedder } from "./registry";
 
 function settings(over: Partial<EffectiveSettings> = {}): EffectiveSettings {
@@ -40,6 +42,7 @@ beforeEach(() => {
   process.env.CODE_EMBED_CONFIG_DIR = mkdtempSync(join(tmpdir(), "ce-reg-"));
   vi.mocked(createLocalEmbedder).mockReset();
   vi.mocked(createOpenAIEmbedder).mockReset();
+  vi.mocked(createWorkerEmbedder).mockReset();
 });
 
 afterEach(() => {
@@ -65,11 +68,18 @@ describe("isLoopbackUrl", () => {
 });
 
 describe("resolveEmbedder", () => {
-  it("builds the local embedder from the model catalog", async () => {
-    const fake = new FakeEmbedder();
-    vi.mocked(createLocalEmbedder).mockReturnValue(fake);
+  it("runs transformer models in the inference worker", async () => {
+    vi.mocked(createWorkerEmbedder).mockReturnValue(new FakeEmbedder());
     await resolveEmbedder({ root: "/p", settings: settings() });
-    expect(vi.mocked(createLocalEmbedder).mock.calls[0]![0].id).toBe(DEFAULTS.model);
+    expect(vi.mocked(createWorkerEmbedder).mock.calls[0]![0].id).toBe(DEFAULTS.model);
+    expect(createLocalEmbedder).not.toHaveBeenCalled();
+  });
+
+  it("keeps static models in process", async () => {
+    vi.mocked(createLocalEmbedder).mockReturnValue(new FakeEmbedder());
+    await resolveEmbedder({ root: "/p", settings: settings({ model: "potion-code-16m" }) });
+    expect(vi.mocked(createLocalEmbedder).mock.calls[0]![0].id).toBe("potion-code-16m");
+    expect(createWorkerEmbedder).not.toHaveBeenCalled();
   });
 
   it("rejects external providers without consent", async () => {
