@@ -2,6 +2,15 @@ name: native-smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      real_model:
+        description: Run the real-model smoke under VS Code Electron
+        type: boolean
+        default: false
+      models:
+        description: Comma-separated model ids for the real-model smoke
+        type: string
+        default: multilingual-e5-small,qwen3-embedding-0.6b
   push:
     tags: ["v*"]
   pull_request:
@@ -48,4 +57,50 @@ jobs:
         with:
           name: stage0-${{ matrix.target }}
           path: stage0-reports/*.json
+          if-no-files-found: warn
+
+  real-model:
+    name: real-model ${{ matrix.target }}
+    if: github.event_name == 'push' || inputs.real_model
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: darwin-arm64, os: macos-14 }
+          - { target: linux-x64, os: ubuntu-22.04 }
+          - { target: win32-x64, os: windows-2022 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      CODE_EMBED_MODELS_DIR: ${{ runner.temp }}/models
+      REAL_MODEL_REPORT_DIR: ${{ github.workspace }}/real-model-reports
+      REAL_MODELS: ${{ github.event_name == 'push' && 'multilingual-e5-small,qwen3-embedding-0.6b' || inputs.models }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/models
+          key: real-model-models-${{ matrix.target }}-${{ hashFiles('packages/engine/src/embed/models.json') }}
+      - name: Real model (Linux, xvfb)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libgbm1 libasound2 libgtk-3-0
+          xvfb-run -a pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --model "$REAL_MODELS" --vscode min,stable
+      - name: Real model
+        if: runner.os != 'Linux'
+        shell: bash
+        run: pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --model "$REAL_MODELS" --vscode min,stable
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-model-${{ matrix.target }}
+          path: real-model-reports/*
           if-no-files-found: warn
