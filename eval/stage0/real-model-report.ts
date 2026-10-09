@@ -1,5 +1,5 @@
 export const THRESHOLDS = {
-  rssMb: { qwen: 2560, bgeM3: 1024, small: 700 },
+  rssMb: { qwen: 2560, bgeM3: 1024, small: 1024 },
   statusP95Ms: 200,
   lexicalP95Ms: 200,
   nr07Ms: 1000,

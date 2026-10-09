@@ -65,7 +65,7 @@ pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts \
 | --- | --- |
 | `no-crash` | нет выхода движка до `shutdown`; в ошибках нет `inference process exited`, `SIGTRAP`, `SIGABRT`, `SIGSEGV` |
 | `progress` | `embedded ≥ min(--min-embedded, chunks)` |
-| `rss` | пик суммы дерева: 2560 МБ для `qwen3-embedding-0.6b`, 1024 МБ для `bge-m3`, 700 МБ для остальных |
+| `rss` | пик суммы дерева: 2560 МБ для `qwen3-embedding-0.6b`, 1024 МБ для `bge-m3`, 1024 МБ для остальных (моделей ≤ 300M; временное утверждённое пользователем отступление от NR-08 с 700 МБ) |
 | `status-p95`, `lexical-p95` | ≤ 200 мс |
 | `nr07` | ≤ 1000 мс от записи файла до появления идентификатора в лексическом поиске |
 | `hybrid-during-indexing`, `find-similar-during-indexing` | p95 и max ≤ 1300 мс; ответ дольше 800 мс обязан быть `partial: true` с `timed out` |

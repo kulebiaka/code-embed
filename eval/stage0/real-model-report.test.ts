@@ -82,7 +82,7 @@ describe("thresholds", () => {
   it("picks the RSS limit by model", () => {
     expect(rssLimitMb("qwen3-embedding-0.6b")).toBe(2560);
     expect(rssLimitMb("bge-m3")).toBe(1024);
-    expect(rssLimitMb("multilingual-e5-small")).toBe(700);
+    expect(rssLimitMb("multilingual-e5-small")).toBe(1024);
   });
 });
 
@@ -111,7 +111,7 @@ describe("evaluate", () => {
     const rss = (kb: number) => ({ supported: true, peakTotalKb: kb, peakRootKb: 1, peakChildKb: 1, rootPeakPhase: null });
     expect(failed(evaluate(okInput({ rss: rss(2561 * 1024) })))).toEqual(["rss"]);
     expect(failed(evaluate(okInput({ rss: rss(2560 * 1024) })))).toEqual([]);
-    expect(failed(evaluate(okInput({ model: "multilingual-e5-small", rss: rss(701 * 1024) })))).toEqual(["rss"]);
+    expect(failed(evaluate(okInput({ model: "multilingual-e5-small", rss: rss(1025 * 1024) })))).toEqual(["rss"]);
     const skipped = evaluate(okInput({ rss: { supported: false, peakTotalKb: 0, peakRootKb: 0, peakChildKb: 0, rootPeakPhase: null } }));
     expect(skipped.find((c) => c.name === "rss")?.status).toBe("skip");
     expect(allPassed(skipped)).toBe(true);
