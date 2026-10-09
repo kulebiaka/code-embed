@@ -98,6 +98,46 @@ afterEach(() => {
 });
 
 describe("findSimilar", () => {
+  describe("embedding timeout while indexing", () => {
+    const expectLexicalPartial = (r: Awaited<ReturnType<typeof findSimilar>>) => {
+      expect(r.partial).toBe(true);
+      expect(r.partialReason).toBe("fragment embedding timed out after 50 ms while indexing; lexical results only");
+      expect(r.results.length).toBeGreaterThan(0);
+      expect(r.results.every((x) => x.sources.join() === "lexical")).toBe(true);
+    };
+
+    it("code: answers lexically with partial", async () => {
+      await build();
+      const slow = new FakeEmbedder({ dims: DIMS, latencyMs: 2000 });
+      const t = performance.now();
+      const r = await findSimilar(ctx({ embedder: slow, embedTimeoutMs: 50 }), {
+        code: "function processPaymentRefund(order) { return gateway.refund(order.amount); }",
+        lang: "typescript",
+      });
+      expect(performance.now() - t).toBeLessThan(500);
+      expectLexicalPartial(r);
+    });
+
+    it("path+range without a stored vector: answers lexically with partial", async () => {
+      await build();
+      const slow = new FakeEmbedder({ dims: DIMS, latencyMs: 2000 });
+      const r = await findSimilar(ctx({ embedder: slow, embedTimeoutMs: 50 }), {
+        path: "src/refund.ts",
+        range: { startLine: 2, endLine: 2 },
+      });
+      expectLexicalPartial(r);
+    });
+
+    it("external abort rejects instead of returning partial", async () => {
+      await build();
+      const slow = new FakeEmbedder({ dims: DIMS, latencyMs: 2000 });
+      const ac = new AbortController();
+      const p = findSimilar(ctx({ embedder: slow, embedTimeoutMs: 1000 }), { code: "refund" }, ac.signal);
+      setTimeout(() => ac.abort(new Error("cancelled")), 20);
+      await expect(p).rejects.toThrow("cancelled");
+    });
+  });
+
   it("reuses stored vector when range matches a chunk and excludes overlapping chunks", async () => {
     await build();
     const r = await findSimilar(ctx(), { path: "src/refund.ts", range: { startLine: 1, endLine: 3 } });

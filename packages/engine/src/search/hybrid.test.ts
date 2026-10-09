@@ -1,11 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openEmbCache } from "../cache/embcache";
 import type { EmbCache } from "../cache/types";
 import { ProviderUnavailableError } from "../errors";
 import { FakeEmbedder } from "../embed/fake";
+import type { Embedder } from "../embed/types";
 import { tokenizeForFts } from "../lex/tokenize";
 import { quantizeInt8 } from "../store/quantize";
 import { openIndexStore } from "../store/sqlite";
@@ -80,12 +81,76 @@ beforeEach(() => {
   embedder = new FakeEmbedder({ dims: DIMS });
 });
 afterEach(() => {
+  vi.useRealTimers();
   store.close();
   cache.close();
   rmSync(dir, { recursive: true, force: true });
 });
 
 describe("search", () => {
+  describe("embedding timeout while indexing", () => {
+    const slow = () => new FakeEmbedder({ dims: DIMS, latencyMs: 2000 });
+
+    it.each(["hybrid", "semantic"] as const)("%s answers lexically with partial when the embedder is slower than the timeout", async (mode) => {
+      await build();
+      const t = performance.now();
+      const r = await search(ctx({ embedder: slow(), embedTimeoutMs: 50 }), { query: "refund payment order", mode });
+      expect(performance.now() - t).toBeLessThan(500);
+      expect(r.partial).toBe(true);
+      expect(r.partialReason).toBe("query embedding timed out after 50 ms while indexing; lexical results only");
+      expect(r.results.length).toBeGreaterThan(0);
+      expect(r.results.every((x) => x.sources.join() === "lexical")).toBe(true);
+    });
+
+    it("aborts the embedder signal, ignores a late vector and leaves no timers", async () => {
+      await build();
+      const real = new FakeEmbedder({ dims: DIMS });
+      let seen: AbortSignal | undefined;
+      let release!: () => void;
+      const gate = new Promise<void>((res) => (release = res));
+      const stubborn: Embedder = {
+        info: real.info,
+        init: () => real.init(),
+        embedDocuments: (t, s) => real.embedDocuments(t, s),
+        embedQueries: async (t) => {
+          await gate;
+          return real.embedQueries(t);
+        },
+        dispose: () => real.dispose(),
+      } as Embedder;
+      const spied = { ...stubborn, embedQueries: (t: string[], s?: AbortSignal) => ((seen = s), stubborn.embedQueries(t, s)) } as Embedder;
+      const lateStore = vi.spyOn(store, "getVectors");
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const pending = search(ctx({ embedder: spied, embedTimeoutMs: 30 }), { query: "refund payment", mode: "hybrid" });
+      await vi.advanceTimersByTimeAsync(30);
+      const r = await pending;
+      expect(r.partial).toBe(true);
+      expect(seen?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      vi.useRealTimers();
+      const calls = lateStore.mock.calls.length;
+      release();
+      await new Promise((res) => setTimeout(res, 20));
+      expect(lateStore.mock.calls.length).toBe(calls);
+      expect(r.results.every((x) => x.sources.join() === "lexical")).toBe(true);
+    });
+
+    it("without a timeout waits for a slow embedder and uses semantics", async () => {
+      await build();
+      const r = await search(ctx({ embedder: new FakeEmbedder({ dims: DIMS, latencyMs: 150 }) }), { query: "refund payment order" });
+      expect(r.partial).toBe(false);
+      expect(r.results[0]!.sources).toContain("semantic");
+    });
+
+    it("external abort rejects instead of returning partial", async () => {
+      await build();
+      const ac = new AbortController();
+      const p = search(ctx({ embedder: slow(), embedTimeoutMs: 1000 }), { query: "refund" }, ac.signal);
+      setTimeout(() => ac.abort(new Error("cancelled")), 20);
+      await expect(p).rejects.toThrow("cancelled");
+    });
+  });
+
   it("hybrid finds results from both sources with normalized scores and snippets", async () => {
     await build();
     const r = await search(ctx(), { query: "refund payment order" });

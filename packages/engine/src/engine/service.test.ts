@@ -5,10 +5,16 @@ import { fileURLToPath } from "node:url";
 import { PROTOCOL_VERSION, type IndexProgress, type SearchResponse } from "@code-embed/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeEmbedder } from "../embed/fake";
+import * as registry from "../embed/registry";
 import { NoIndexError, ProtocolMismatchError } from "../errors";
 import { log } from "../util/log";
 import { SERVER_VERSION, createLocalEngine } from "./service";
 import type { LocalEngine, LocalEngineOptions } from "./types";
+
+vi.mock("../embed/registry", async (orig) => {
+  const actual = await orig<typeof import("../embed/registry")>();
+  return { ...actual, resolveEmbedder: vi.fn(actual.resolveEmbedder) };
+});
 
 const FIXTURE = fileURLToPath(new URL("../../test/fixtures/sample-repo", import.meta.url));
 
@@ -296,4 +302,30 @@ describe("LocalEngine", () => {
     const st = await b.status();
     expect(st.embedded).toBe(st.chunks);
   });
+
+  it("bounds query embedding by a timeout only while the vector phase is running", async () => {
+    const root = makeRepo();
+    const first = await open(root);
+    await first.indexAll({});
+    await first.close();
+    writeFileSync(join(root, "src/extra.ts"), "export function quokkaExtra() {\n  return 42;\n}\n");
+
+    vi.mocked(registry.resolveEmbedder).mockImplementationOnce(async () => new FakeEmbedder({ dims: 64, latencyMs: 1500 }));
+    const engine = await open(root, { vectorPhase: true });
+    let res: SearchResponse | undefined;
+    await vi.waitFor(async () => {
+      const t = performance.now();
+      res = await engine.search({ query: "refund payment" });
+      expect(res.partialReason).toContain("timed out");
+      expect(performance.now() - t).toBeLessThan(1400);
+    }, { timeout: 10_000, interval: 50 });
+    expect(res!.partial).toBe(true);
+    expect(res!.results.length).toBeGreaterThan(0);
+    expect(res!.results.every((r) => r.sources.join() === "lexical")).toBe(true);
+
+    await engine.indexAll({});
+    const after = await engine.search({ query: "refund payment" });
+    expect(after.partial).toBe(false);
+    expect(after.results.some((r) => r.sources.includes("semantic"))).toBe(true);
+  }, 30_000);
 });
