@@ -32,4 +32,22 @@ describe.skipIf(!enabled)("local embedder (real model)", () => {
     expect(emb.countTokens("hello world")).toBeGreaterThan(0);
     await emb.dispose();
   }, 600_000);
+
+  it("embeds texts longer than the cap and of mixed length, keeping order", async () => {
+    const modelsDir = process.env.CODE_EMBED_CACHE_DIR
+      ? join(process.env.CODE_EMBED_CACHE_DIR, "models")
+      : await mkdtemp(join(tmpdir(), "code-embed-models-"));
+    const emb = createLocalEmbedder(getModel(modelId), { modelsDir, threads: 2 });
+    const short = "function add(a, b) { return a + b; }";
+    const long = "検索😀".repeat(3000);
+    const ident = "veryLongIdentifierName".repeat(400);
+    const texts = [long, short, ident, short, "x".repeat(2000), short];
+    const vecs = await emb.embedDocuments(texts);
+    expect(vecs.length).toBe(texts.length);
+    for (const v of vecs) expect(dot(v, v)).toBeCloseTo(1, 3);
+    expect(dot(vecs[1]!, vecs[3]!)).toBeCloseTo(1, 3);
+    expect(dot(vecs[1]!, vecs[5]!)).toBeCloseTo(1, 3);
+    expect(dot(vecs[1]!, vecs[0]!)).toBeLessThan(0.999);
+    await emb.dispose();
+  }, 600_000);
 });
