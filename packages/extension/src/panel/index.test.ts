@@ -31,7 +31,10 @@ function setup() {
   const signals: AbortSignal[] = [];
   const resolvers: ((r: SearchResponse) => void)[] = [];
   const client = {
+    state: "ready",
     lastStatus: undefined,
+    rebuild: vi.fn(async () => undefined),
+    findSimilar: vi.fn(async () => resp),
     onStatus: vi.fn(),
     search: vi.fn((_p: unknown, signal?: AbortSignal) => {
       signals.push(signal!);
@@ -77,6 +80,25 @@ describe("panel host", () => {
     expect(t.posted.at(-1)).toEqual({ type: "results", requestId: 4, query: "q", response: resp });
   });
 
+  it("uses the page size requested by the webview", async () => {
+    const t = setup();
+    await t.send({ type: "ready" });
+    void t.send({ type: "search", requestId: 5, query: "q", mode: "hybrid", include: [], exclude: [], top: 40 });
+    expect(t.client.search).toHaveBeenCalledWith(expect.objectContaining({ top: 40 }), expect.any(AbortSignal));
+  });
+
+  it("copies a reference and shows similar code for a result", async () => {
+    const t = setup();
+    await t.send({ type: "ready" });
+    const write = vi.spyOn(vscode.env.clipboard, "writeText").mockResolvedValue(undefined as never);
+    vi.spyOn(vscode.window, "setStatusBarMessage").mockReturnValue(undefined as never);
+    await t.send({ type: "copy", text: "src/a.ts:3" });
+    expect(write).toHaveBeenCalledWith("src/a.ts:3");
+    await t.send({ type: "similar", path: "src/a.ts", range: { startLine: 3, endLine: 9 } });
+    expect(t.client.findSimilar).toHaveBeenCalledWith({ path: "src/a.ts", range: { startLine: 3, endLine: 9 } });
+    expect(t.posted.at(-1)).toEqual({ type: "results", requestId: 0, query: "", response: resp, title: "Similar to src/a.ts:3-9" });
+  });
+
   it("aborts on cancel and suppresses the response", async () => {
     const t = setup();
     await t.send({ type: "ready" });
@@ -105,6 +127,18 @@ describe("panel host", () => {
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codeEmbed.panel.focus");
   });
 
+  it("runs panel commands and clears results", async () => {
+    const t = setup();
+    await t.send({ type: "ready" });
+    expect(t.posted[1]).toEqual({ type: "engine", state: "ready" });
+    await t.send({ type: "command", command: "openSettings" });
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codeEmbed.openSettings");
+    await t.send({ type: "command", command: "index" });
+    expect(t.client.rebuild).toHaveBeenCalledWith({ full: false });
+    t.provider.clear();
+    expect(t.posted.at(-1)).toEqual({ type: "clear" });
+  });
+
   it("focus and runQuery notify the webview", async () => {
     const t = setup();
     await t.send({ type: "ready" });
@@ -130,5 +164,7 @@ describe("panel host", () => {
     const opts = show.mock.calls[0]![1] as { selection: vscode.Range };
     expect([opts.selection.start.line, opts.selection.start.character]).toEqual([2, 0]);
     expect([opts.selection.end.line, opts.selection.end.character]).toEqual([4, 9]);
+    await t.send({ type: "open", path: "src/a.ts", range: { startLine: 3, endLine: 5, startByte: 0, endByte: 1 }, side: true });
+    expect(show.mock.calls[1]![1]).toMatchObject({ viewColumn: vscode.ViewColumn.Beside });
   });
 });

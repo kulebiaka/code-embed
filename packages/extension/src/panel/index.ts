@@ -1,18 +1,23 @@
 import { randomBytes } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import * as vscode from "vscode";
-import type { SearchMode, SearchResponse } from "@code-embed/protocol/rpc";
+import type { LineRange, SearchMode, SearchResponse } from "@code-embed/protocol/rpc";
 import { resultSelection } from "../commands/util";
 import { workspaceRoot } from "../settings";
 import type { EngineClient } from "../engine/types";
-import type { HostToWebview, WebviewToHost } from "./messages";
+import type { HostToWebview, PanelCommand, WebviewToHost } from "./messages";
 import type { PanelController } from "./types";
 
 const VIEW_ID = "codeEmbed.panel";
 
-export function buildHtml(webview: Pick<vscode.Webview, "cspSource" | "asWebviewUri">, extensionUri: vscode.Uri, nonce: string): string {
-  const script = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "dist", "webview.js"));
-  const css = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "dist", "webview.css"));
+export function buildHtml(
+  webview: Pick<vscode.Webview, "cspSource" | "asWebviewUri">,
+  extensionUri: vscode.Uri,
+  nonce: string,
+  entry = "webview",
+): string {
+  const script = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "dist", `${entry}.js`));
+  const css = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "dist", `${entry}.css`));
   const csp = `default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; font-src ${webview.cspSource}; img-src ${webview.cspSource};`;
   return `<!DOCTYPE html>
 <html lang="en">
@@ -56,7 +61,17 @@ export class PanelProvider implements vscode.WebviewViewProvider, PanelControlle
   }
 
   attachStatus(): vscode.Disposable {
-    return this.client.onStatus((status) => this.post({ type: "status", status }, false));
+    return vscode.Disposable.from(
+      this.client.onStatus((status) => this.post({ type: "status", status }, false)),
+      this.client.onDidChangeState((state) => this.post({ type: "engine", state }, false)),
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration("codeEmbed.search")) this.post(this.configMessage(), false);
+      }),
+    );
+  }
+
+  clear(): void {
+    this.post({ type: "clear" }, false);
   }
 
   async focus(): Promise<void> {
@@ -87,16 +102,38 @@ export class PanelProvider implements vscode.WebviewViewProvider, PanelControlle
         await this.search(msg);
         return;
       case "open":
-        await this.open(msg.path, msg.range);
+        await this.open(msg.path, msg.range, msg.side);
+        return;
+      case "copy":
+        await vscode.env.clipboard.writeText(msg.text);
+        vscode.window.setStatusBarMessage(`Copied ${msg.text}`, 2000);
+        return;
+      case "similar":
+        await this.similar(msg.path, msg.range);
+        return;
+      case "command":
+        await this.command(msg.command);
         return;
     }
   }
 
-  private sendInitial(): void {
+  private async command(command: PanelCommand): Promise<void> {
+    try {
+      if (command === "index") await this.client.rebuild({ full: false });
+      else await vscode.commands.executeCommand(command === "openSettings" ? "codeEmbed.openSettings" : "codeEmbed.showLog");
+    } catch (err) {
+      this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private configMessage(): HostToWebview {
     const cfg = vscode.workspace.getConfiguration("codeEmbed");
-    const defaultMode = cfg.get<SearchMode>("search.defaultMode", "hybrid");
-    const top = cfg.get<number>("search.top", 20);
-    this.raw({ type: "config", defaultMode, top });
+    return { type: "config", defaultMode: cfg.get<SearchMode>("search.defaultMode", "hybrid"), top: cfg.get<number>("search.top", 20) };
+  }
+
+  private sendInitial(): void {
+    this.raw(this.configMessage());
+    this.raw({ type: "engine", state: this.client.state });
     const status = this.client.lastStatus;
     if (status) this.raw({ type: "status", status });
     const queued = this.pending;
@@ -107,7 +144,7 @@ export class PanelProvider implements vscode.WebviewViewProvider, PanelControlle
   private async search(msg: Extract<WebviewToHost, { type: "search" }>): Promise<void> {
     const ctl = new AbortController();
     this.inflight.set(msg.requestId, ctl);
-    const top = vscode.workspace.getConfiguration("codeEmbed").get<number>("search.top", 20);
+    const top = msg.top ?? vscode.workspace.getConfiguration("codeEmbed").get<number>("search.top", 20);
     try {
       const response = await this.client.search(
         { query: msg.query, mode: msg.mode, include: msg.include, exclude: msg.exclude, lang: msg.lang, top },
@@ -123,13 +160,22 @@ export class PanelProvider implements vscode.WebviewViewProvider, PanelControlle
     }
   }
 
-  private async open(path: string, range: { startLine: number; endLine: number }): Promise<void> {
+  private async similar(path: string, range: LineRange): Promise<void> {
+    try {
+      const resp = await this.client.findSimilar({ path, range });
+      await this.showSimilar(`Similar to ${path}:${range.startLine}-${range.endLine}`, resp);
+    } catch (err) {
+      this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async open(path: string, range: LineRange, side = false): Promise<void> {
     const root = workspaceRoot();
     const uri = isAbsolute(path) || !root ? vscode.Uri.file(path) : vscode.Uri.file(join(root, path));
     const doc = await vscode.workspace.openTextDocument(uri);
     const s = resultSelection(range, doc);
     const selection = new vscode.Range(s.startLine, s.startCharacter, s.endLine, s.endCharacter);
-    await vscode.window.showTextDocument(doc, { selection, preview: true });
+    await vscode.window.showTextDocument(doc, { selection, preview: true, ...(side ? { viewColumn: vscode.ViewColumn.Beside } : {}) });
   }
 
   private abortAll(): void {

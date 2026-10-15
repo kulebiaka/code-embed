@@ -29,7 +29,7 @@ async function stageExtension() {
   delete pkg.dependencies;
   delete pkg.devDependencies;
   await writeFile(join(dir, "package.json"), JSON.stringify(pkg, null, 2));
-  for (const f of ["extension.js", "webview.js", "webview.css"]) {
+  for (const f of ["extension.js", "webview.js", "webview.css", "settings.js", "settings.css", "codicon.ttf"]) {
     if (existsSync(join(extDir, "dist", f))) await cp(join(extDir, "dist", f), join(dir, "dist", f));
   }
   await cp(join(extDir, "media"), join(dir, "media"), { recursive: true });

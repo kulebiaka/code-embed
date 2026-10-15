@@ -61,7 +61,8 @@
       {
         "command": "codeEmbed.reindex",
         "title": "Reindex Workspace",
-        "category": "Code Embed"
+        "category": "Code Embed",
+        "icon": "$(refresh)"
       },
       {
         "command": "codeEmbed.installCli",
@@ -92,6 +93,18 @@
         "command": "codeEmbed.showLog",
         "title": "Show Log",
         "category": "Code Embed"
+      },
+      {
+        "command": "codeEmbed.openSettings",
+        "title": "Open Settings",
+        "category": "Code Embed",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "codeEmbed.clearResults",
+        "title": "Clear Results",
+        "category": "Code Embed",
+        "icon": "$(clear-all)"
       }
     ],
     "keybindings": [
@@ -108,144 +121,202 @@
           "when": "editorHasSelection",
           "group": "navigation@90"
         }
+      ],
+      "view/title": [
+        {
+          "command": "codeEmbed.reindex",
+          "when": "view == codeEmbed.panel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeEmbed.clearResults",
+          "when": "view == codeEmbed.panel",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeEmbed.openSettings",
+          "when": "view == codeEmbed.panel",
+          "group": "navigation@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "codeEmbed.clearResults",
+          "when": "false"
+        }
       ]
     },
-    "configuration": {
-      "title": "Code Embed",
-      "properties": {
-        "codeEmbed.index.location": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "project",
-            "cache"
-          ],
-          "enumDescriptions": [
-            "Inside the project (.code-embed/), or in the user cache when the project is on a risky file system (network drive, cloud sync).",
-            "Always inside the project (.code-embed/).",
-            "Always in the user cache directory."
-          ],
-          "default": "auto",
-          "description": "Where to store the index."
-        },
-        "codeEmbed.index.maxFileKb": {
-          "type": "number",
-          "default": 512,
-          "minimum": 1,
-          "description": "Files larger than this (in KB) are not indexed."
-        },
-        "codeEmbed.index.threads": {
-          "type": "integer",
-          "default": 0,
-          "minimum": 0,
-          "description": "Number of threads for the local embedding model (0 = automatic)."
-        },
-        "codeEmbed.index.pauseOnBattery": {
-          "type": "boolean",
-          "default": false,
-          "description": "Pause the vector phase of indexing while running on battery."
-        },
-        "codeEmbed.search.defaultMode": {
-          "type": "string",
-          "enum": [
-            "hybrid",
-            "semantic",
-            "lexical"
-          ],
-          "enumDescriptions": [
-            "Combine meaning (embeddings) and keywords (BM25).",
-            "Meaning only (embeddings).",
-            "Keywords and identifiers only (BM25)."
-          ],
-          "default": "hybrid",
-          "description": "Default search mode."
-        },
-        "codeEmbed.search.top": {
-          "type": "integer",
-          "default": 20,
-          "minimum": 1,
-          "description": "Number of results to show."
-        },
-        "codeEmbed.model.id": {
-          "type": "string",
-          "default": "qwen3-embedding-0.6b",
-          "description": "Local embedding model from the built-in catalog (see \"Code Embed: Select Model\")."
-        },
-        "codeEmbed.model.offlineArchive": {
-          "type": "string",
-          "default": "",
-          "description": "Path to an offline model archive to install from instead of downloading."
-        },
-        "codeEmbed.providers": {
-          "type": "object",
-          "default": {},
-          "markdownDescription": "OpenAI-compatible embedding providers: name → configuration. Do not put API keys here; use `api_key_env` or the \"Code Embed: Select Embedding Provider\" command.",
-          "additionalProperties": {
+    "configuration": [
+      {
+        "id": "embeddings",
+        "title": "Embeddings",
+        "order": 1,
+        "properties": {
+          "codeEmbed.embedding.provider": {
+            "type": "string",
+            "default": "local",
+            "description": "Embedding provider: \"local\" (built-in model) or the name of a provider from codeEmbed.providers.",
+            "order": 1
+          },
+          "codeEmbed.providers": {
             "type": "object",
-            "required": [
-              "kind",
-              "base_url",
-              "model"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "openai"
-                ]
-              },
-              "base_url": {
-                "type": "string",
-                "description": "Base URL of the API, e.g. http://localhost:11434/v1"
-              },
-              "model": {
-                "type": "string"
-              },
-              "query_prefix": {
-                "type": "string"
-              },
-              "doc_prefix": {
-                "type": "string"
-              },
-              "max_input_tokens": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "batch_size": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "concurrency": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "dimensions": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "api_key_env": {
-                "type": "string",
-                "description": "Name of the environment variable holding the API key."
-              },
-              "rpm": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "tpm": {
-                "type": "integer",
-                "minimum": 1
+            "default": {},
+            "markdownDescription": "OpenAI-compatible embedding providers: name → configuration. Easier to manage on the [settings page](command:codeEmbed.openSettings). Do not put API keys here; use `api_key_env` or the settings page, which keeps keys in VS Code secret storage.",
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "kind",
+                "base_url",
+                "model"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "openai"
+                  ]
+                },
+                "base_url": {
+                  "type": "string",
+                  "description": "Base URL of the API, e.g. http://localhost:11434/v1"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "query_prefix": {
+                  "type": "string"
+                },
+                "doc_prefix": {
+                  "type": "string"
+                },
+                "max_input_tokens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "batch_size": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "concurrency": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "dimensions": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "api_key_env": {
+                  "type": "string",
+                  "description": "Name of the environment variable holding the API key."
+                },
+                "rpm": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "tpm": {
+                  "type": "integer",
+                  "minimum": 1
+                }
               }
-            }
+            },
+            "order": 2
           }
-        },
-        "codeEmbed.embedding.provider": {
-          "type": "string",
-          "default": "local",
-          "description": "Embedding provider: \"local\" (built-in model) or the name of a provider from codeEmbed.providers."
+        }
+      },
+      {
+        "id": "local-model",
+        "title": "Local Model",
+        "order": 2,
+        "properties": {
+          "codeEmbed.model.id": {
+            "type": "string",
+            "default": "qwen3-embedding-0.6b",
+            "description": "Local embedding model from the built-in catalog (see \"Code Embed: Select Model\").",
+            "order": 1
+          },
+          "codeEmbed.model.offlineArchive": {
+            "type": "string",
+            "default": "",
+            "description": "Path to an offline model archive to install from instead of downloading.",
+            "order": 2
+          }
+        }
+      },
+      {
+        "id": "index",
+        "title": "Index",
+        "order": 3,
+        "properties": {
+          "codeEmbed.index.location": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "project",
+              "cache"
+            ],
+            "enumDescriptions": [
+              "Inside the project (.code-embed/), or in the user cache when the project is on a risky file system (network drive, cloud sync).",
+              "Always inside the project (.code-embed/).",
+              "Always in the user cache directory."
+            ],
+            "default": "auto",
+            "description": "Where to store the index.",
+            "order": 1
+          },
+          "codeEmbed.index.maxFileKb": {
+            "type": "number",
+            "default": 512,
+            "minimum": 1,
+            "description": "Files larger than this (in KB) are not indexed.",
+            "order": 2
+          },
+          "codeEmbed.index.threads": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "description": "Number of threads for the local embedding model (0 = automatic).",
+            "order": 3
+          },
+          "codeEmbed.index.pauseOnBattery": {
+            "type": "boolean",
+            "default": false,
+            "description": "Pause the vector phase of indexing while running on battery.",
+            "order": 4
+          }
+        }
+      },
+      {
+        "id": "search",
+        "title": "Search",
+        "order": 4,
+        "properties": {
+          "codeEmbed.search.defaultMode": {
+            "type": "string",
+            "enum": [
+              "hybrid",
+              "semantic",
+              "lexical"
+            ],
+            "enumDescriptions": [
+              "Combine meaning (embeddings) and keywords (BM25).",
+              "Meaning only (embeddings).",
+              "Keywords and identifiers only (BM25)."
+            ],
+            "default": "hybrid",
+            "description": "Default search mode.",
+            "order": 1
+          },
+          "codeEmbed.search.top": {
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "description": "Number of results to show.",
+            "order": 2
+          }
         }
       }
-    },
+    ],
     "languageModelTools": [
       {
         "name": "code-embed_search",
@@ -409,6 +480,7 @@
   },
   "dependencies": {
     "@code-embed/protocol": "workspace:*",
+    "@vscode/codicons": "0.0.46-24",
     "highlight.js": "^11.12.0",
     "vscode-jsonrpc": "^9.0.3"
   },

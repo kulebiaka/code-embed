@@ -30,15 +30,24 @@ describe("extension manifest", () => {
       "codeEmbed.selectModel": "Code Embed: Select Model",
       "codeEmbed.testProvider": "Code Embed: Test Provider",
       "codeEmbed.showLog": "Code Embed: Show Log",
+      "codeEmbed.openSettings": "Code Embed: Open Settings",
+      "codeEmbed.clearResults": "Code Embed: Clear Results",
     });
     expect(manifest.contributes.keybindings).toEqual([{ command: "codeEmbed.focus", key: "ctrl+alt+f", mac: "cmd+alt+f" }]);
     expect(manifest.contributes.menus["editor/context"]).toEqual([
       expect.objectContaining({ command: "codeEmbed.findSimilar", when: "editorHasSelection" }),
     ]);
+    expect(manifest.contributes.menus["view/title"].map((m) => [m.command, m.when])).toEqual([
+      ["codeEmbed.reindex", "view == codeEmbed.panel"],
+      ["codeEmbed.clearResults", "view == codeEmbed.panel"],
+      ["codeEmbed.openSettings", "view == codeEmbed.panel"],
+    ]);
   });
 
-  it("contributes all settings", () => {
-    expect(Object.keys(manifest.contributes.configuration.properties).sort()).toEqual(
+  it("contributes all settings grouped into categories", () => {
+    const categories = manifest.contributes.configuration;
+    expect(categories.map((c) => c.title)).toEqual(["Embeddings", "Local Model", "Index", "Search"]);
+    expect(categories.flatMap((c) => Object.keys(c.properties)).sort()).toEqual(
       [
         "codeEmbed.index.location",
         "codeEmbed.index.maxFileKb",

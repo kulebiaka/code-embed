@@ -24,6 +24,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const extDir = join(here, "..");
 const engineDir = join(extDir, "..", "engine");
 const rootDir = join(extDir, "..", "..");
+const DIST_FILES = ["extension.js", "webview.js", "webview.css", "settings.js", "settings.css", "codicon.ttf"];
 
 function matches(list, value) {
   if (!Array.isArray(list) || list.length === 0) return true;
@@ -145,9 +146,7 @@ async function main() {
 
   const engineDist = join(engineDir, "dist");
   const required = [
-    join(extDir, "dist/extension.js"),
-    join(extDir, "dist/webview.js"),
-    join(extDir, "dist/webview.css"),
+    ...DIST_FILES.map((f) => join(extDir, "dist", f)),
     join(engineDist, "cli.js"),
     join(engineDist, "grammars"),
     join(engineDist, "tree-sitter.wasm"),
@@ -170,7 +169,7 @@ async function main() {
 
     const dist = join(stage, "dist");
     await mkdir(join(dist, "engine"), { recursive: true });
-    for (const f of ["extension.js", "webview.js", "webview.css"]) await cp(join(extDir, "dist", f), join(dist, f));
+    for (const f of DIST_FILES) await cp(join(extDir, "dist", f), join(dist, f));
     await cp(join(engineDist, "cli.js"), join(dist, "engine/cli.js"));
     await cp(join(engineDist, "grammars"), join(dist, "engine/grammars"), { recursive: true });
     await cp(join(engineDist, "tree-sitter.wasm"), join(dist, "engine/tree-sitter.wasm"));

@@ -28,9 +28,26 @@ await Promise.all([
     logLevel: "info",
   }),
   build({
-    entryPoints: [p("webview/style.css")],
-    outfile: p("dist/webview.css"),
+    entryPoints: [p("webview/settings/main.ts")],
+    outfile: p("dist/settings.js"),
     bundle: true,
+    platform: "browser",
+    format: "iife",
+    target: "es2022",
+    sourcemap: true,
     logLevel: "info",
   }),
+  ...[
+    ["webview/style.css", "dist/webview.css"],
+    ["webview/settings/style.css", "dist/settings.css"],
+  ].map(([entry, out]) =>
+    build({
+      entryPoints: [p(entry)],
+      outfile: p(out),
+      bundle: true,
+      loader: { ".ttf": "file" },
+      assetNames: "[name]",
+      logLevel: "info",
+    }),
+  ),
 ]);

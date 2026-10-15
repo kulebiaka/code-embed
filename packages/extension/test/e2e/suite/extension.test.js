@@ -15,6 +15,8 @@ const COMMANDS = [
   "codeEmbed.selectModel",
   "codeEmbed.testProvider",
   "codeEmbed.showLog",
+  "codeEmbed.openSettings",
+  "codeEmbed.clearResults",
 ];
 
 function extension() {
@@ -48,6 +50,16 @@ describe("Code Embed in VS Code", function () {
   it("resolves the codeEmbed.panel view", async () => {
     await vscode.commands.executeCommand("codeEmbed.panel.focus");
     await vscode.commands.executeCommand("codeEmbed.focus");
+  });
+
+  it("opens a single settings page", async () => {
+    const tabs = () => vscode.window.tabGroups.all.flatMap((g) => g.tabs);
+    const settingsTabs = () => tabs().filter((t) => t.input instanceof vscode.TabInputWebview && t.label === "Code Embed Settings");
+    await vscode.commands.executeCommand("codeEmbed.openSettings");
+    await vscode.commands.executeCommand("codeEmbed.openSettings");
+    for (let i = 0; i < 40 && settingsTabs().length === 0; i++) await sleep(50);
+    assert.strictEqual(settingsTabs().length, 1, tabs().map((t) => `${t.label} (${t.input?.constructor?.name})`).join(", "));
+    await vscode.window.tabGroups.close(settingsTabs());
   });
 
   it("registers language model tools from the manifest", () => {

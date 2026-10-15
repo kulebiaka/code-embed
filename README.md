@@ -19,7 +19,9 @@
 
 Установите расширение «Code Embed» из VS Code Marketplace или Open VSX (Cursor, Windsurf и другие форки используют Open VSX). VSIX собираются под каждую платформу и содержат движок. Модель по умолчанию (`qwen3-embedding-0.6b`, около 600 МБ) скачивается отдельно; команда `Code Embed: Install CLI` ставит CLI.
 
-Команды (палитра, категория «Code Embed»): Focus (`Ctrl+Alt+F` / `Cmd+Alt+F`), Quick Search, Find Similar Code, Reindex Workspace, Install CLI, Copy MCP Config, Select Embedding Provider, Select Model, Test Provider, Show Log.
+Команды (палитра, категория «Code Embed»): Focus (`Ctrl+Alt+F` / `Cmd+Alt+F`), Quick Search, Find Similar Code, Reindex Workspace, Install CLI, Copy MCP Config, Select Embedding Provider, Select Model, Test Provider, Show Log, Open Settings. Open Settings (шестерёнка в заголовке панели поиска) открывает страницу настроек: статус индекса, выбор и проверка провайдеров, API-ключи, каталог моделей, параметры индексации и поиска.
+
+В панели поиска: `Alt+↑`/`Alt+↓` переключают режим (hybrid, semantic, lexical), стрелки ходят по результатам, `Enter` открывает результат, `Ctrl+Enter` / `Cmd+Enter` открывает его сбоку, `←` переходит к файлу и сворачивает группу, `→` разворачивает, `Esc` возвращает в поле запроса. У результата есть кнопки «открыть сбоку», «скопировать путь:строку» и «найти похожий код».
 
 ### CLI
 

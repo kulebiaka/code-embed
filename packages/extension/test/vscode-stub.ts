@@ -173,6 +173,12 @@ export enum ViewColumn {
   Three = 3,
 }
 
+export enum ConfigurationTarget {
+  Global = 1,
+  Workspace = 2,
+  WorkspaceFolder = 3,
+}
+
 export enum ProgressLocation {
   SourceControl = 1,
   Window = 10,
@@ -184,6 +190,8 @@ export const window = {
   createOutputChannel: unmocked("window.createOutputChannel"),
   createStatusBarItem: unmocked("window.createStatusBarItem"),
   registerWebviewViewProvider: unmocked("window.registerWebviewViewProvider"),
+  createWebviewPanel: unmocked("window.createWebviewPanel"),
+  showOpenDialog: unmocked("window.showOpenDialog"),
   showInformationMessage: unmocked("window.showInformationMessage"),
   showWarningMessage: unmocked("window.showWarningMessage"),
   showErrorMessage: unmocked("window.showErrorMessage"),
@@ -191,6 +199,7 @@ export const window = {
   showInputBox: unmocked("window.showInputBox"),
   createQuickPick: unmocked("window.createQuickPick"),
   showTextDocument: unmocked("window.showTextDocument"),
+  setStatusBarMessage: unmocked("window.setStatusBarMessage"),
   withProgress: unmocked("window.withProgress"),
   onDidChangeActiveTextEditor: unmocked("window.onDidChangeActiveTextEditor"),
 };

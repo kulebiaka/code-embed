@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import type { SearchResult } from "@code-embed/protocol";
 import type { EngineClient, EngineSupervisor } from "../engine/types";
 import type { PanelController } from "../panel/types";
+import { SettingsPage } from "../settings-page";
 import { SECTION, workspaceRoot } from "../settings";
 import { installCommand, mcpConfigJson, nodeVersionOk, run, resultSelection, rootRelativePath, selectionLineRange } from "./util";
 
@@ -43,8 +44,8 @@ export function registerCommands(ctx: vscode.ExtensionContext, deps: CommandDeps
   reg("codeEmbed.reindex", async () => {
     const pick = await vscode.window.showQuickPick(
       [
-        { label: "Reindex changed files", full: false },
-        { label: "Full rebuild", description: "Drop and rebuild the whole index", full: true },
+        { label: "Update index", full: false },
+        { label: "Rebuild from scratch", description: "Delete the index and re-embed every file", full: true },
       ],
       { placeHolder: "Reindex workspace" },
     );
@@ -64,6 +65,8 @@ export function registerCommands(ctx: vscode.ExtensionContext, deps: CommandDeps
   reg("codeEmbed.selectModel", () => selectModel(client));
   reg("codeEmbed.testProvider", () => testProvider(client));
   reg("codeEmbed.showLog", () => supervisor.showLog());
+  reg("codeEmbed.openSettings", () => SettingsPage.show(ctx, client, supervisor));
+  reg("codeEmbed.clearResults", () => panel.clear());
 
   const asked = new Set<string>();
   ctx.subscriptions.push(
@@ -173,7 +176,7 @@ async function findSimilar(client: EngineClient, panel: PanelController): Promis
     return;
   }
   const resp = await client.findSimilar({ path: rel, range });
-  await panel.showSimilar(`${rel}:${range.startLine}-${range.endLine}`, resp);
+  await panel.showSimilar(`Similar to ${rel}:${range.startLine}-${range.endLine}`, resp);
 }
 
 async function installCli(ctx: vscode.ExtensionContext): Promise<void> {

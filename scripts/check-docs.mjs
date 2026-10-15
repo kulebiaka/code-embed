@@ -99,7 +99,10 @@ if (!/\bMIT\b/.test(licenseText)) fail('README.md: "Лицензии" must state
 if (!/телеметри/i.test(licenseText)) fail('README.md: "Лицензии" must state there is no telemetry');
 
 const manifest = JSON.parse(read("packages/extension/package.json"));
-const settings = Object.keys(manifest.contributes?.configuration?.properties ?? {}).filter((k) => k.startsWith("codeEmbed."));
+const settings = [manifest.contributes?.configuration ?? []]
+  .flat()
+  .flatMap((c) => Object.keys(c.properties ?? {}))
+  .filter((k) => k.startsWith("codeEmbed."));
 const cfgDoc = texts["docs/configuration.md"] ?? "";
 for (const s of settings) {
   if (!cfgDoc.includes(`\`${s}\``)) fail(`docs/configuration.md: setting "${s}" is not documented`);

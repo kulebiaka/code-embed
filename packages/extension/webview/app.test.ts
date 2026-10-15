@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IndexStatus, SearchResponse, SearchResult } from "@code-embed/protocol/rpc";
 import type { WebviewToHost } from "../src/panel/messages";
 import { createApp, type App } from "./app";
-import { bannerText, groupByFile, moveSelection, splitGlobs } from "./logic";
+import { bannerText, groupByFile, snippetWindow, splitGlobs } from "./logic";
 
 function result(path: string, startLine: number, over: Partial<SearchResult> = {}): SearchResult {
   return {
@@ -52,19 +52,22 @@ describe("logic", () => {
 
   it("computes the banner", () => {
     expect(bannerText(resp([]), status())).toBeUndefined();
-    expect(bannerText(resp([]), status({ embedded: 37 }))).toBe("Идёт индексация, 37% векторов — результаты неполные");
-    expect(bannerText(resp([], true), status({ embedded: 100 }))).toContain("100%");
-    expect(bannerText(resp([], true), undefined)).toContain("0%");
+    expect(bannerText(resp([]), status({ embedded: 37 }))).toBe("Indexing 37% · partial results");
+    expect(bannerText(resp([], true), status({ embedded: 100 }))).toContain("keyword matches only");
+    expect(bannerText(resp([], true), undefined)).toContain("keyword matches only");
     expect(bannerText(resp([]), status({ embedded: 0, lexicalOnly: true }))).toBeUndefined();
   });
 
-  it("splits globs and moves selection within bounds", () => {
+  it("splits globs", () => {
     expect(splitGlobs(" src/**, *.ts ,,")).toEqual(["src/**", "*.ts"]);
-    expect(moveSelection(-1, 1, 3)).toBe(0);
-    expect(moveSelection(-1, -1, 3)).toBe(2);
-    expect(moveSelection(2, 1, 3)).toBe(2);
-    expect(moveSelection(0, -1, 3)).toBe(0);
-    expect(moveSelection(0, 1, 0)).toBe(-1);
+  });
+
+  it("keeps the first match inside the snippet window", () => {
+    expect(snippetWindow(4, 3, 6)).toEqual({ from: 0, to: 4 });
+    expect(snippetWindow(20, undefined, 6)).toEqual({ from: 0, to: 6 });
+    expect(snippetWindow(20, 2, 6)).toEqual({ from: 1, to: 7 });
+    expect(snippetWindow(20, 12, 6)).toEqual({ from: 11, to: 17 });
+    expect(snippetWindow(20, 19, 6)).toEqual({ from: 14, to: 20 });
   });
 });
 
@@ -166,7 +169,7 @@ describe("app", () => {
     expect(banner().hidden).toBe(true);
     app.handle({ type: "status", status: status({ embedded: 50 }) });
     expect(banner().hidden).toBe(false);
-    expect(banner().textContent).toBe("Идёт индексация, 50% векторов — результаты неполные");
+    expect(banner().textContent).toBe("Indexing 50% · partial results");
     app.handle({ type: "status", status: status() });
     expect(banner().hidden).toBe(true);
   });
@@ -184,5 +187,160 @@ describe("app", () => {
   it("runs a query pushed by the host immediately", () => {
     app.handle({ type: "focusInput", query: "hello" });
     expect(searches()[0]?.query).toBe("hello");
+  });
+
+  it("switches mode with the toggle buttons and searches right away", () => {
+    type("foo");
+    const lexical = root.querySelector<HTMLButtonElement>('.mode[data-mode="lexical"]')!;
+    lexical.click();
+    expect(lexical.getAttribute("aria-pressed")).toBe("true");
+    expect(root.querySelector('.mode[data-mode="hybrid"]')!.getAttribute("aria-pressed")).toBe("false");
+    expect(searches().at(-1)).toMatchObject({ query: "foo", mode: "lexical" });
+  });
+
+  it("hides filters behind a toggle that shows when filters are active", () => {
+    const filters = root.querySelector<HTMLElement>(".filters")!;
+    const toggle = root.querySelector<HTMLButtonElement>(".filter-toggle")!;
+    expect(filters.hidden).toBe(true);
+    toggle.click();
+    expect(filters.hidden).toBe(false);
+    const include = root.querySelector<HTMLInputElement>(".include")!;
+    include.value = "src/**";
+    include.dispatchEvent(new Event("input"));
+    toggle.click();
+    expect(filters.hidden).toBe(true);
+    expect(toggle.classList.contains("active")).toBe(true);
+  });
+
+  it("shows a busy bar, a summary and a hint when nothing is found", () => {
+    type("foo");
+    vi.advanceTimersByTime(250);
+    expect(root.querySelector(".busy")!.classList.contains("active")).toBe(true);
+    app.handle({ type: "results", requestId: searches()[0]!.requestId, query: "foo", response: resp([result("src/a.ts", 1), result("b.ts", 2)]) });
+    expect(root.querySelector(".busy")!.classList.contains("active")).toBe(false);
+    expect(root.querySelector(".summary")!.textContent).toBe("2 results in 2 files · 1 ms");
+    expect(root.querySelector(".file-name")!.textContent).toBe("a.ts");
+    expect(root.querySelector(".file-dir")!.textContent).toBe("src");
+    root.querySelector<HTMLButtonElement>('.mode[data-mode="lexical"]')!.click();
+    app.handle({ type: "results", requestId: searches().at(-1)!.requestId, query: "foo", response: resp([]) });
+    expect(root.querySelector(".message")!.textContent).toContain("Try Hybrid or Semantic mode");
+  });
+
+  it("collapses a file group and skips it during keyboard navigation", () => {
+    type("foo");
+    vi.advanceTimersByTime(250);
+    app.handle({ type: "results", requestId: searches()[0]!.requestId, query: "foo", response: resp([result("a.ts", 1), result("a.ts", 5), result("b.ts", 7)]) });
+    root.querySelector<HTMLElement>(".file")!.click();
+    expect(root.querySelector(".group")!.classList.contains("collapsed")).toBe(true);
+    input().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(root.querySelector(".result.selected .symbol")!.textContent).toBe("fn7");
+  });
+
+  it("shows welcome, engine and empty-index states before the first query", () => {
+    const empty = () => root.querySelector<HTMLElement>(".empty")!;
+    app.handle({ type: "engine", state: "ready" });
+    app.handle({ type: "status", status: status() });
+    expect(empty().querySelectorAll(".example")).toHaveLength(3);
+    empty().querySelector<HTMLButtonElement>(".example")!.click();
+    expect(searches().at(-1)?.query).toBe("where are http requests retried");
+    expect(empty().hidden).toBe(true);
+
+    app.handle({ type: "clear" });
+    expect(input().value).toBe("");
+    expect(empty().hidden).toBe(false);
+    app.handle({ type: "status", status: status({ chunks: 0, embedded: 0 }) });
+    empty().querySelector<HTMLButtonElement>(".btn")!.click();
+    expect(sent.at(-1)).toEqual({ type: "command", command: "index" });
+    app.handle({ type: "engine", state: "failed" });
+    empty().querySelector<HTMLButtonElement>(".btn")!.click();
+    expect(sent.at(-1)).toEqual({ type: "command", command: "showLog" });
+  });
+
+  it("shows the match of a long chunk and how many lines are hidden", () => {
+    type("foo");
+    vi.advanceTimersByTime(250);
+    const text = Array.from({ length: 20 }, (_, i) => `line${i}`).join("\n");
+    const r = result("a.ts", 100, { range: { startLine: 100, endLine: 119, startByte: 0, endByte: 1 }, snippet: { text, startLine: 100, highlights: [{ line: 12, start: 0, end: 4 }] } });
+    app.handle({ type: "results", requestId: searches()[0]!.requestId, query: "foo", response: resp([r]) });
+    expect(root.querySelector("mark.match")?.textContent).toBe("line");
+    expect(root.querySelector(".line-no")?.textContent).toBe("111");
+    expect(root.querySelector(".more-lines")?.textContent).toBe("+14 more lines");
+  });
+
+  it("loads more results with a larger page, keeping collapsed groups", () => {
+    app.handle({ type: "config", defaultMode: "hybrid", top: 2 });
+    type("foo");
+    vi.advanceTimersByTime(250);
+    expect(searches()[0]).toMatchObject({ top: 2 });
+    const more = root.querySelector<HTMLButtonElement>(".show-more")!;
+    app.handle({ type: "results", requestId: searches()[0]!.requestId, query: "foo", response: { ...resp([result("a.ts", 1), result("b.ts", 2)]), total: 5 } });
+    expect(more.hidden).toBe(false);
+    root.querySelector<HTMLElement>(".file")!.click();
+    more.click();
+    expect(searches().at(-1)).toMatchObject({ query: "foo", top: 4 });
+    app.handle({ type: "results", requestId: searches().at(-1)!.requestId, query: "foo", response: { ...resp([result("a.ts", 1), result("b.ts", 2), result("c.ts", 3), result("d.ts", 4)]), total: 4 } });
+    expect(more.hidden).toBe(true);
+    expect(root.querySelector(".group")!.classList.contains("collapsed")).toBe(true);
+    type("bar");
+    vi.advanceTimersByTime(250);
+    expect(searches().at(-1)).toMatchObject({ query: "bar", top: 2 });
+  });
+
+  it("offers per-result actions and keyboard shortcuts", () => {
+    type("foo");
+    vi.advanceTimersByTime(250);
+    app.handle({ type: "results", requestId: searches()[0]!.requestId, query: "foo", response: resp([result("a.ts", 3), result("b.ts", 7)]) });
+    const key = (target: Element, k: string, init: KeyboardEventInit = {}) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, ...init }));
+    const actions = root.querySelectorAll<HTMLButtonElement>(".result-actions .icon-btn");
+    actions[0]!.click();
+    expect(sent.at(-1)).toMatchObject({ type: "open", path: "a.ts", side: true });
+    actions[1]!.click();
+    expect(sent.at(-1)).toEqual({ type: "copy", text: "a.ts:3" });
+    actions[2]!.click();
+    expect(sent.at(-1)).toEqual({ type: "similar", path: "a.ts", range: { startLine: 3, endLine: 4 } });
+
+    const nodes = root.querySelectorAll<HTMLElement>(".result");
+    key(input(), "ArrowDown");
+    key(nodes[0]!, "Enter", { ctrlKey: true });
+    expect(sent.at(-1)).toMatchObject({ type: "open", path: "a.ts", side: true });
+    key(nodes[0]!, "ArrowLeft");
+    const file = root.querySelector<HTMLElement>(".file")!;
+    expect(document.activeElement).toBe(file);
+    key(file, "ArrowLeft");
+    expect(root.querySelector(".group")!.classList.contains("collapsed")).toBe(true);
+    key(file, "ArrowRight");
+    expect(root.querySelector(".group")!.classList.contains("collapsed")).toBe(false);
+    key(file, "ArrowDown");
+    expect(nodes[0]!.classList.contains("selected")).toBe(true);
+    key(nodes[0]!, "Escape");
+    expect(document.activeElement).toBe(input());
+
+    key(input(), "ArrowUp", { altKey: true });
+    expect(searches().at(-1)).toMatchObject({ mode: "lexical" });
+    expect(input().placeholder).toBe("Search identifiers");
+    key(input(), "ArrowDown", { altKey: true });
+    expect(searches().at(-1)).toMatchObject({ mode: "hybrid" });
+    expect(root.querySelector(".result.selected")).toBeNull();
+  });
+
+  it("summarises hidden filters and clears them", () => {
+    const include = root.querySelector<HTMLInputElement>(".include")!;
+    const summaryEl = root.querySelector<HTMLElement>(".filter-summary")!;
+    include.value = "src/**";
+    include.dispatchEvent(new Event("input"));
+    expect(summaryEl.hidden).toBe(false);
+    expect(summaryEl.textContent).toBe("src/**");
+    type("foo");
+    summaryEl.querySelector<HTMLButtonElement>(".icon-btn")!.click();
+    expect(include.value).toBe("");
+    expect(summaryEl.hidden).toBe(true);
+    expect(searches().at(-1)).toMatchObject({ include: [] });
+  });
+
+  it("closes the similar-results view and returns to the search", () => {
+    app.handle({ type: "results", requestId: 0, query: "", response: resp([result("s.ts", 1)]), title: "Similar to x" });
+    root.querySelector<HTMLButtonElement>(".title-bar .icon-btn")!.click();
+    expect(root.querySelector<HTMLElement>(".title-bar")!.hidden).toBe(true);
+    expect(root.querySelectorAll(".result")).toHaveLength(0);
   });
 });
