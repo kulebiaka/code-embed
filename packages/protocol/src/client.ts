@@ -21,7 +21,7 @@ import {
   type LogParams,
 } from "./rpc";
 
-const UPGRADE_MESSAGE = "protocol version mismatch: update the extension/CLI (обновите расширение/CLI)";
+const UPGRADE_MESSAGE = "protocol version mismatch: update the extension/CLI";
 
 function toRpcError(err: unknown): unknown {
   if (err instanceof EngineRpcError) return err;

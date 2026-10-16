@@ -40,10 +40,10 @@ describe("renderMarkdown", () => {
   const md = renderMarkdown({ model: "fake", createdAt: "now", reports, nr10: checkNr10(reports) });
 
   it("includes metrics, repos and the NR-10 verdict", () => {
-    expect(md).toContain("| hybrid | все | 10 | 0.800 | 0.500 |");
+    expect(md).toContain("| hybrid | all | 10 | 0.800 | 0.500 |");
     expect(md).toContain("| hybrid | cobra |");
-    expect(md).toContain("NR-10 выполняется");
-    expect(md).toContain("p95 9.0 мс");
+    expect(md).toContain("NR-10 holds");
+    expect(md).toContain("p95 9.0 ms");
   });
 });
 
@@ -53,7 +53,7 @@ describe("bench", () => {
     expect(row).toMatchObject({ model: "fake", recall: 0.8, recallRu: 0.4, chunksPerSec: 100, p95: 9 });
     const md = renderBenchMarkdown([row, { model: "bad", error: "download | failed" }], "now");
     expect(md).toContain("| fake | 2.0 | 100.0 | 512 | 3.0 | 9.0 | 0.800 | 0.400 | 0.500 | 0.500 |");
-    expect(md).toContain("| bad | ошибка: download / failed |");
+    expect(md).toContain("| bad | error: download / failed |");
   });
 });
 

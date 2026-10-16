@@ -36,7 +36,7 @@ describe("consent", () => {
     });
     expect(out).toBe("ok");
     expect(grant).toHaveBeenCalledWith({ host: "h.example" });
-    expect(err()).toContain("Код будет отправлен на h.example. Разрешить? [y/N]");
+    expect(err()).toContain("Code will be sent to h.example. Allow? [y/N]");
   });
 
   it("declined answer returns null without granting", async () => {

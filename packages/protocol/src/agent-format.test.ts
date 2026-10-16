@@ -74,7 +74,7 @@ describe("formatForAgent", () => {
   });
   it("golden: partial warning goes first", () => {
     const out = formatForAgent(resp([result("a.ts", 1, "x")], { partial: true, partialReason: "vector indexing 40%" }));
-    expect(out.split("\n")[0]).toBe("Предупреждение: индекс неполный (vector indexing 40%), результаты могут быть неполными.");
+    expect(out.split("\n")[0]).toBe("Warning: the index is incomplete (vector indexing 40%), results may be incomplete.");
     expect(out.split("\n")[1]).toBe("a.ts:1-3  fn  (0.81)");
   });
   it("truncates snippets to 12 lines", () => {
@@ -89,7 +89,7 @@ describe("formatForAgent", () => {
     const results = Array.from({ length: 30 }, (_, i) => result(`f${i}.ts`, 1, text));
     const out = formatForAgent(resp(results));
     expect(out.length).toBeLessThanOrEqual(16000 + 40);
-    const m = out.match(/… ещё (\d+) результатов$/);
+    const m = out.match(/… (\d+) more results$/);
     expect(m).not.toBeNull();
     const shown = out.split("\n").filter((l) => /^f\d+\.ts:/.test(l)).length;
     expect(shown + Number(m![1])).toBe(30);
@@ -97,9 +97,9 @@ describe("formatForAgent", () => {
   it("always includes the first result", () => {
     const out = formatForAgent(resp([result("a.ts", 1, "x".repeat(500)), result("b.ts", 1, "y")]), { maxTokens: 10 });
     expect(out).toContain("a.ts:1-3");
-    expect(out.endsWith("… ещё 1 результатов")).toBe(true);
+    expect(out.endsWith("… 1 more results")).toBe(true);
   });
   it("reports empty results", () => {
-    expect(formatForAgent(resp([]))).toBe("Ничего не найдено.");
+    expect(formatForAgent(resp([]))).toBe("Nothing found.");
   });
 });

@@ -80,10 +80,10 @@ export function registerCommands(ctx: vscode.ExtensionContext, deps: CommandDeps
 }
 
 async function askConsent(client: EngineClient, host: string, output: vscode.OutputChannel): Promise<void> {
-  const allow = "Разрешить";
+  const allow = "Allow";
   const choice = await vscode.window.showWarningMessage(
-    `Код будет отправлен на ${host}`,
-    { modal: true, detail: "Фрагменты кода проекта будут передаваться внешнему сервису для построения эмбеддингов." },
+    `Code will be sent to ${host}`,
+    { modal: true, detail: "Fragments of the project's code will be sent to an external service to compute embeddings." },
     allow,
   );
   if (choice !== allow) return;

@@ -109,10 +109,10 @@ export function formatForAgent(resp: SearchResponse, opts?: AgentFormatOptions):
     used += s.length + 1;
   };
   if (resp.partial) {
-    push(`Предупреждение: индекс неполный${resp.partialReason ? ` (${resp.partialReason})` : ""}, результаты могут быть неполными.`);
+    push(`Warning: the index is incomplete${resp.partialReason ? ` (${resp.partialReason})` : ""}, results may be incomplete.`);
   }
   if (resp.results.length === 0) {
-    push("Ничего не найдено.");
+    push("Nothing found.");
     return out.join("\n");
   }
   let shown = 0;
@@ -123,6 +123,6 @@ export function formatForAgent(resp: SearchResponse, opts?: AgentFormatOptions):
     shown++;
   }
   const rest = resp.results.length - shown;
-  if (rest > 0) out.push(`… ещё ${rest} результатов`);
+  if (rest > 0) out.push(`… ${rest} more results`);
   return out.join("\n");
 }

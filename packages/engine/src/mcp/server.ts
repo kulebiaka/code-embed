@@ -18,6 +18,7 @@ import {
   type SearchToolInput,
 } from "@code-embed/protocol";
 import { z } from "zod";
+import { SERVER_VERSION } from "../engine/service";
 import { NoIndexError } from "../errors";
 import { openEngine, type OpenedEngine } from "../server/client";
 import { log } from "../util/log";
@@ -28,7 +29,7 @@ export interface McpServerOptions {
   output?: NodeJS.WritableStream;
 }
 
-const NO_INDEX_HINT = "Индекс не найден. Выполните `code-embed index` в корне проекта.";
+const NO_INDEX_HINT = "Index not found. Run `code-embed index` in the project root.";
 
 const top = z.number().int().min(1).max(MAX_TOOL_TOP).optional();
 
@@ -78,7 +79,7 @@ export function createMcpServer(root: string): { server: McpServer; close(): Pro
     }
   };
 
-  const server = new McpServer({ name: "code-embed", version: "0.1.0" });
+  const server = new McpServer({ name: "code-embed", version: SERVER_VERSION });
 
   server.registerTool(
     TOOL_NAMES.search,

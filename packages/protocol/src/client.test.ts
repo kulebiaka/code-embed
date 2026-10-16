@@ -160,7 +160,7 @@ describe("engine proxy over Content-Length streams", () => {
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(EngineRpcError);
     expect((err as EngineRpcError).code).toBe(ErrorCodes.ProtocolMismatch);
-    expect((err as EngineRpcError).message).toContain("обновите расширение/CLI");
+    expect((err as EngineRpcError).message).toContain("update the extension/CLI");
     expect(api.initialize).not.toHaveBeenCalled();
   });
 

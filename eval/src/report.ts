@@ -64,26 +64,26 @@ const f = (v: number | undefined, digits = 3) => (v === undefined ? "-" : v.toFi
 const metricCells = (m: EvalMetrics) => `${m.count} | ${f(m.recallAt10)} | ${f(m.mrr)}`;
 
 export function renderMarkdown(result: RunResult): string {
-  const lines = [`# Eval: ${result.model}`, "", `Создан: ${result.createdAt}`, ""];
-  lines.push("## Метрики по режимам", "");
-  lines.push("| Режим | Выборка | Запросов | Recall@10 | MRR |", "|---|---|---|---|---|");
+  const lines = [`# Eval: ${result.model}`, "", `Created: ${result.createdAt}`, ""];
+  lines.push("## Metrics by mode", "");
+  lines.push("| Mode | Subset | Queries | Recall@10 | MRR |", "|---|---|---|---|---|");
   for (const r of result.reports) {
-    lines.push(`| ${r.mode} | все | ${metricCells(r.overall)} |`);
-    lines.push(`| ${r.mode} | ru (информационно) | ${metricCells(r.ru)} |`);
+    lines.push(`| ${r.mode} | all | ${metricCells(r.overall)} |`);
+    lines.push(`| ${r.mode} | ru (informational) | ${metricCells(r.ru)} |`);
     lines.push(`| ${r.mode} | en | ${metricCells(r.en)} |`);
   }
-  lines.push("", "## По репозиториям", "");
-  lines.push("| Режим | Репозиторий | Запросов | Recall@10 | MRR |", "|---|---|---|---|---|");
+  lines.push("", "## By repository", "");
+  lines.push("| Mode | Repository | Queries | Recall@10 | MRR |", "|---|---|---|---|---|");
   for (const r of result.reports) {
     for (const [repo, m] of Object.entries(r.perRepo)) lines.push(`| ${r.mode} | ${repo} | ${metricCells(m)} |`);
   }
   const timed = result.reports.find((r) => r.indexSeconds !== undefined);
   if (timed) {
-    lines.push("", "## Индексация и поиск", "");
-    lines.push(`- индексация: ${f(timed.indexSeconds, 1)} с, ${f(timed.chunksPerSec, 1)} чанков/с`);
-    lines.push(`- пиковый RSS: ${f(timed.rssMb, 0)} МБ`);
+    lines.push("", "## Indexing and search", "");
+    lines.push(`- indexing: ${f(timed.indexSeconds, 1)} s, ${f(timed.chunksPerSec, 1)} chunks/s`);
+    lines.push(`- peak RSS: ${f(timed.rssMb, 0)} MB`);
     for (const r of result.reports) {
-      if (r.latencyMs) lines.push(`- поиск ${r.mode}: p50 ${f(r.latencyMs.p50, 1)} мс, p95 ${f(r.latencyMs.p95, 1)} мс`);
+      if (r.latencyMs) lines.push(`- search ${r.mode}: p50 ${f(r.latencyMs.p50, 1)} ms, p95 ${f(r.latencyMs.p95, 1)} ms`);
     }
   }
   lines.push("", "## NR-10", "");
@@ -92,24 +92,24 @@ export function renderMarkdown(result: RunResult): string {
     lines.push(
       `Recall@10: hybrid ${f(n.hybrid)}, lexical ${f(n.lexical)}, semantic ${f(n.semantic)}.`,
       "",
-      n.ok ? "NR-10 выполняется: hybrid >= max(lexical, semantic)." : "NR-10 НЕ выполняется: hybrid < max(lexical, semantic).",
+      n.ok ? "NR-10 holds: hybrid >= max(lexical, semantic)." : "NR-10 does NOT hold: hybrid < max(lexical, semantic).",
     );
   } else {
-    lines.push("Не проверялось: для проверки нужны все три режима.");
+    lines.push("Not checked: all three modes are required.");
   }
-  lines.push("", "Русская метрика информационная, порога нет.", "");
+  lines.push("", "The Russian metric is informational, with no threshold.", "");
   return lines.join("\n");
 }
 
 export function renderBenchMarkdown(rows: BenchRow[], createdAt: string): string {
-  const lines = [`# Бенчмарк моделей`, "", `Создан: ${createdAt}`, "", "Качество — hybrid-режим.", ""];
+  const lines = [`# Model benchmark`, "", `Created: ${createdAt}`, "", "Quality is measured in hybrid mode.", ""];
   lines.push(
-    "| Модель | Индексация, с | Чанков/с | Пик RSS, МБ | p50, мс | p95, мс | Recall@10 | Recall@10 ru | MRR | MRR ru |",
+    "| Model | Indexing, s | Chunks/s | Peak RSS, MB | p50, ms | p95, ms | Recall@10 | Recall@10 ru | MRR | MRR ru |",
     "|---|---|---|---|---|---|---|---|---|---|",
   );
   for (const r of rows) {
     if (r.error) {
-      lines.push(`| ${r.model} | ошибка: ${r.error.replace(/\|/g, "/").replace(/\s+/g, " ")} | | | | | | | | |`);
+      lines.push(`| ${r.model} | error: ${r.error.replace(/\|/g, "/").replace(/\s+/g, " ")} | | | | | | | | |`);
       continue;
     }
     lines.push(

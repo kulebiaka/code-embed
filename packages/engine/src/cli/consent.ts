@@ -22,7 +22,7 @@ export function consentNeeded(err: unknown): ConsentNeeded | null {
 }
 
 export async function askConsent(io: CliIO, host: string): Promise<boolean> {
-  io.stderr.write(`Код будет отправлен на ${host}. Разрешить? [y/N] `);
+  io.stderr.write(`Code will be sent to ${host}. Allow? [y/N] `);
   const rl = createInterface({ input: io.stdin, terminal: false });
   try {
     const answer = await new Promise<string>((resolve) => {

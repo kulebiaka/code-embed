@@ -201,9 +201,9 @@ export function createEngineSupervisor(ctx: vscode.ExtensionContext, output: vsc
     if (plan.delayMs === undefined) {
       setState("failed");
       void vscode.window
-        .showErrorMessage(`Code Embed engine crashed ${MAX_CRASHES} times in 5 minutes.`, "Показать лог")
+        .showErrorMessage(`Code Embed engine crashed ${MAX_CRASHES} times in 5 minutes.`, "Show Log")
         .then((choice) => {
-          if (choice === "Показать лог") output.show(true);
+          if (choice === "Show Log") output.show(true);
         });
       return;
     }
@@ -218,8 +218,8 @@ export function createEngineSupervisor(ctx: vscode.ExtensionContext, output: vsc
   const fail = (message: string) => {
     log(message);
     setState("failed");
-    void vscode.window.showErrorMessage(message, "Показать лог").then((choice) => {
-      if (choice === "Показать лог") output.show(true);
+    void vscode.window.showErrorMessage(message, "Show Log").then((choice) => {
+      if (choice === "Show Log") output.show(true);
     });
   };
 
@@ -308,7 +308,7 @@ export function createEngineSupervisor(ctx: vscode.ExtensionContext, output: vsc
       if (err instanceof EngineRpcError && err.code === ErrorCodes.ProtocolMismatch) {
         if (s.conn) teardown(s);
         session = undefined;
-        fail("Code Embed: protocol version mismatch, update the extension/CLI (обновите расширение/CLI).");
+        fail("Code Embed: protocol version mismatch, update the extension/CLI.");
         return;
       }
       onSessionLost(s, gen, err instanceof Error ? err.message : String(err));
