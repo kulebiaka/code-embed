@@ -40,6 +40,7 @@ describe("rpc contract", () => {
     expect(Notifications).toEqual({
       filesChanged: "files.changed",
       filesOpened: "files.opened",
+      clientActivity: "client.activity",
       indexProgress: "index.progress",
       indexError: "index.error",
       log: "log",

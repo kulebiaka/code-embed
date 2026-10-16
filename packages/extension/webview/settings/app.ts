@@ -1,10 +1,21 @@
 import type { IndexStatus, ModelListItem, ProviderTestResult, SearchMode } from "@code-embed/protocol/rpc";
 import { SEARCH_MODES } from "@code-embed/protocol/rpc";
 import type { ClientState } from "../../src/engine/types";
-import type { HostToSettings, ProviderRow, SettingKey, SettingsState, SettingsToHost } from "../../src/settings-page/messages";
+import type { HostToSettings, ProviderRow, SettingKey, SettingsAction, SettingsState, SettingsToHost } from "../../src/settings-page/messages";
 import { button, el, icon, iconButton } from "../dom";
 import { MODE_INFO } from "../logic";
-import { engineSummary, formFromConfig, NUMBER_FIELDS, parseIntSetting, type ProviderForm, TEXT_FIELDS, validateProvider } from "./logic";
+import {
+  engineSummary,
+  formFromConfig,
+  indexCounts,
+  matchesFilter,
+  NUMBER_FIELDS,
+  parseIntSetting,
+  type ProviderForm,
+  remoteHost,
+  TEXT_FIELDS,
+  validateProvider,
+} from "./logic";
 
 export interface HostApi {
   postMessage(msg: SettingsToHost): void;
@@ -62,6 +73,15 @@ function tag(text: string, opts: { icon?: string; tone?: "ok" | "warn" } = {}): 
   return t;
 }
 
+function radio(checked: boolean, label: string): HTMLButtonElement {
+  const r = el("button", "radio");
+  r.type = "button";
+  r.setAttribute("role", "radio");
+  r.setAttribute("aria-checked", String(checked));
+  r.setAttribute("aria-label", label);
+  return r;
+}
+
 export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp {
   let state: SettingsState | undefined;
   let engine: ClientState | undefined;
@@ -72,6 +92,7 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
   const fields: FieldHandle[] = [];
 
   const post = (msg: SettingsToHost) => host.postMessage(msg);
+  const action = (a: SettingsAction) => post({ type: "action", action: a });
   const value = (key: SettingKey): unknown => state?.settings[key]?.value;
   const update = (key: SettingKey, v: unknown) => post({ type: "update", key, value: v });
 
@@ -79,57 +100,75 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
   const page = el("div", "page");
   root.append(page);
 
+  // ---- Header
   const header = el("header", "page-header");
-  const titleBox = el("div", "page-title");
-  titleBox.append(el("h1", undefined, "Code Embed"), el("div", "muted", "Semantic and keyword code search settings"));
-  const scopeBox = el("div", "scope");
-  const scopeSeg = el("div", "segmented");
-  scopeSeg.setAttribute("role", "radiogroup");
-  scopeSeg.setAttribute("aria-label", "Settings scope");
-  const scopeUser = el("button", undefined, "User");
-  const scopeWs = el("button", undefined, "Workspace");
+  const titleRow = el("div", "page-title");
+  titleRow.append(el("h1", undefined, "Code Embed"), el("span", "muted", "Semantic and keyword code search settings"));
+  const searchBox = el("label", "settings-search");
+  const searchInput = el("input");
+  searchInput.type = "search";
+  searchInput.placeholder = "Search Code Embed settings";
+  searchInput.setAttribute("aria-label", "Search settings");
+  searchInput.spellcheck = false;
+  searchBox.append(icon("search"), searchInput);
+
+  const scopeBar = el("div", "scope-bar");
+  const tabs = el("div", "scope-tabs");
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Settings scope");
+  const scopeUser = el("button", "scope-tab", "User");
+  const scopeWs = el("button", "scope-tab", "Workspace");
   for (const [b, scope] of [
     [scopeUser, "user"],
     [scopeWs, "workspace"],
   ] as const) {
     b.type = "button";
-    b.setAttribute("role", "radio");
+    b.setAttribute("role", "tab");
     b.addEventListener("click", () => post({ type: "setScope", scope }));
-    scopeSeg.append(b);
+    tabs.append(b);
   }
-  const scopeHint = el("div", "scope-hint muted");
-  const openJson = el("button", "link", "Open settings.json");
+  const scopeHint = el("span", "scope-hint muted");
+  const openJson = el("button", "link icon-link");
   openJson.type = "button";
-  openJson.addEventListener("click", () => post({ type: "action", action: "openJson" }));
-  scopeBox.append(scopeSeg, scopeHint, openJson);
-  header.append(titleBox, scopeBox);
+  openJson.append(icon("go-to-file"), "Open settings.json");
+  openJson.addEventListener("click", () => action("openJson"));
+  scopeBar.append(tabs, scopeHint, openJson);
+  header.append(titleRow, searchBox, scopeBar);
   page.append(header);
 
   const layout = el("div", "layout");
   const nav = el("nav", "toc");
   const main = el("main");
+  const noMatch = el("div", "no-match muted", "No settings found.");
+  noMatch.hidden = true;
+  main.append(noMatch);
   layout.append(nav, main);
   page.append(layout);
 
+  const tocLinks = new Map<string, { link: HTMLElement; count: HTMLElement }>();
   function section(id: string, title: string, description?: string): HTMLElement {
     const s = el("section", "section");
     s.id = id;
     s.append(el("h2", undefined, title));
     if (description) s.append(el("p", "section-desc muted", description));
     main.append(s);
-    const link = el("button", "toc-link", title);
+    const link = el("button", "toc-link");
     link.type = "button";
     link.dataset.target = id;
+    const count = el("span", "badge");
+    count.hidden = true;
+    link.append(el("span", undefined, title), count);
     link.addEventListener("click", () => s.scrollIntoView({ behavior: "smooth", block: "start" }));
     nav.append(link);
+    tocLinks.set(id, { link, count });
     return s;
   }
 
   function updateToc(): void {
-    const sections = [...main.querySelectorAll<HTMLElement>(".section")];
+    const sections = [...main.querySelectorAll<HTMLElement>(".section:not([hidden])")];
     const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
     const current = atBottom ? sections.at(-1) : (sections.filter((sec) => sec.getBoundingClientRect().top <= 80).at(-1) ?? sections[0]);
-    for (const link of nav.querySelectorAll<HTMLElement>(".toc-link")) {
+    for (const { link } of tocLinks.values()) {
       const on = link.dataset.target === current?.id;
       link.classList.toggle("current", on);
       if (on) link.setAttribute("aria-current", "true");
@@ -138,41 +177,106 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
   }
   window.addEventListener("scroll", updateToc, { passive: true });
 
+  function applyFilter(): void {
+    const q = searchInput.value.trim();
+    let any = false;
+    for (const s of main.querySelectorAll<HTMLElement>(".section")) {
+      const title = s.querySelector("h2")!.textContent ?? "";
+      const units = [...s.querySelectorAll<HTMLElement>("[data-search]")];
+      const titleHit = q !== "" && matchesFilter(title, q);
+      let hits = 0;
+      for (const u of units) {
+        const show = q === "" || titleHit || matchesFilter(u.textContent ?? "", q);
+        u.classList.toggle("filtered", !show);
+        if (show) hits++;
+      }
+      s.hidden = q !== "" && hits === 0;
+      tocLinks.get(s.id)!.link.hidden = s.hidden;
+      if (!s.hidden) any = true;
+    }
+    noMatch.hidden = any;
+    updateToc();
+  }
+  searchInput.addEventListener("input", applyFilter);
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && searchInput.value) {
+      searchInput.value = "";
+      applyFilter();
+    }
+  });
+
   // ---- Status
   const statusSec = section("status", "Status");
   const statusCard = el("div", "card status-card");
+  statusCard.dataset.search = "";
   statusSec.append(statusCard);
+
+  const menu = el("div", "menu");
+  menu.hidden = true;
+  menu.setAttribute("role", "menu");
+  const menuItem = (label: string, a: SettingsAction) => {
+    const b = el("button", "menu-item", label);
+    b.type = "button";
+    b.setAttribute("role", "menuitem");
+    b.addEventListener("click", () => {
+      menu.hidden = true;
+      action(a);
+    });
+    menu.append(b);
+  };
+  menuItem("Rebuild from scratch…", "rebuild");
+  menuItem("Show log", "showLog");
+  document.addEventListener("click", (e) => {
+    if (!menu.hidden && !(e.target as HTMLElement).closest(".more-btn, .menu")) menu.hidden = true;
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") menu.hidden = true;
+  });
+
+  function modelInfo(): string {
+    if (!status) return "";
+    if (status.remote) return `${status.model ?? status.provider} · ${status.host ?? "remote"}`;
+    const model = status.model ?? status.provider;
+    const dims = state?.models?.find((m) => m.id === status!.model)?.dims;
+    return [model, dims ? `${n(dims)} dimensions` : undefined, "on this machine"].filter(Boolean).join(" · ");
+  }
 
   function renderStatus(): void {
     statusCard.textContent = "";
     const sum = engineSummary(engine, status);
-    const head = el("div", "status-head");
+    const ready = engine === "ready";
+    const line = el("div", "status-line");
     const label = el("div", `status-label tone-${sum.tone}`);
     label.append(icon(sum.tone === "ok" ? "pass-filled" : sum.tone === "busy" ? "loading" : sum.tone === "warn" ? "warning" : "error", sum.tone === "busy" ? "spin" : ""));
     label.append(el("span", undefined, sum.label));
+    const counts = el("span", "status-counts muted", status ? indexCounts(status) : "");
     const actions = el("div", "actions");
-    const ready = engine === "ready";
     const reindex = button("Update index", { icon: "refresh", secondary: true });
     reindex.title = "Index only new and changed files";
     reindex.disabled = !ready;
-    reindex.addEventListener("click", () => post({ type: "action", action: "reindex" }));
-    const rebuild = button("Rebuild from scratch", { icon: "database", secondary: true });
-    rebuild.title = "Delete the index and re-embed every file";
-    rebuild.disabled = !ready;
-    rebuild.addEventListener("click", () => post({ type: "action", action: "rebuild" }));
+    reindex.addEventListener("click", () => action("reindex"));
     const paused = status?.phase === "paused";
-    const pause = button(paused ? "Resume indexing" : "Pause indexing", { icon: paused ? "debug-start" : "debug-pause", secondary: true });
+    const pause = button(paused ? "Resume" : "Pause", { icon: paused ? "debug-start" : "debug-pause", secondary: true });
+    pause.title = paused ? "Resume indexing" : "Pause indexing";
     pause.disabled = !ready;
-    pause.addEventListener("click", () => post({ type: "action", action: paused ? "resume" : "pause" }));
-    actions.append(reindex, rebuild, pause);
+    pause.addEventListener("click", () => action(paused ? "resume" : "pause"));
+    const more = iconButton("ellipsis", "More actions", "more-btn");
+    more.setAttribute("aria-haspopup", "menu");
+    more.addEventListener("click", () => {
+      menu.hidden = !menu.hidden;
+      for (const b of menu.querySelectorAll<HTMLButtonElement>(".menu-item")) b.disabled = b.textContent!.startsWith("Rebuild") && !ready;
+    });
+    const moreWrap = el("div", "more-wrap");
+    moreWrap.append(more, menu);
+    actions.append(reindex, pause, moreWrap);
     if (engine === "failed" || engine === "stopped") {
       const log = button("Show log", { icon: "output" });
-      log.addEventListener("click", () => post({ type: "action", action: "showLog" }));
-      actions.append(log);
+      log.addEventListener("click", () => action("showLog"));
+      actions.prepend(log);
     }
-    head.append(label, actions);
-    statusCard.append(head);
-    if (sum.percent !== undefined) {
+    line.append(label, counts, actions);
+    statusCard.append(line);
+    if (sum.percent !== undefined && sum.tone === "busy") {
       const meter = el("div", "meter");
       const fill = el("div");
       fill.style.width = `${sum.percent}%`;
@@ -180,20 +284,18 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
       statusCard.append(meter);
     }
     if (!status) return;
-    const grid = el("dl", "stats");
-    const stat = (k: string, v: string, wide = false) => {
-      const d = el("div", wide ? "wide" : undefined);
-      const dd = el("dd", undefined, v);
-      dd.title = v;
-      d.append(el("dt", undefined, k), dd);
-      grid.append(d);
-    };
-    stat("Files", n(status.files));
-    stat("Chunks", n(status.chunks));
-    stat("Embedded", status.lexicalOnly ? "—" : n(status.embedded));
-    stat("Embeddings", status.remote ? `${status.provider} → ${status.host ?? "remote"}` : `${status.provider === "local" ? (status.model ?? "local") : status.provider}, on this machine`, true);
-    stat("Index", status.indexDir, true);
-    statusCard.append(grid);
+    const details = el("dl", "status-details");
+    details.append(el("dt", undefined, "Model"), el("dd", undefined, modelInfo()));
+    const where = el("dd", "index-path");
+    const path = el("span", "path", status.indexDir);
+    path.title = status.indexDir;
+    const copy = iconButton("copy", "Copy path");
+    copy.addEventListener("click", () => action("copyIndexPath"));
+    const reveal = iconButton("folder-opened", "Open folder");
+    reveal.addEventListener("click", () => action("revealIndex"));
+    where.append(path, copy, reveal);
+    details.append(el("dt", undefined, "Index"), where);
+    statusCard.append(details);
     const flags: HTMLElement[] = [];
     if (status.readOnly) flags.push(tag("Read-only", { icon: "lock" }));
     if (status.daemon) flags.push(tag("Shared daemon", { icon: "server-process" }));
@@ -210,7 +312,7 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
   }
 
   // ---- Embeddings
-  const embSec = section("embeddings", "Embedding provider", "Where code is turned into vectors. The built-in model keeps everything on this machine.");
+  const embSec = section("embeddings", "Embeddings", "Where code is turned into vectors. The built-in model keeps everything on this machine.");
   const providerList = el("div", "list");
   providerList.setAttribute("role", "radiogroup");
   providerList.setAttribute("aria-label", "Embedding provider");
@@ -222,8 +324,9 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
   embSec.append(providerList, formCard, addBtn);
 
   const formTitle = el("h3");
-  const presets = el("div", "presets");
-  presets.append(el("span", "muted", "Presets:"));
+  const presetSeg = el("div", "segmented presets");
+  presetSeg.setAttribute("role", "radiogroup");
+  presetSeg.setAttribute("aria-label", "Provider preset");
   const inputs = {} as Record<keyof ProviderForm, HTMLInputElement>;
   const errorsEl = {} as Record<keyof ProviderForm, HTMLElement>;
   function formField(key: keyof ProviderForm, placeholder = "", hint?: string): HTMLElement {
@@ -249,40 +352,63 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
   const keyHint = el("span", "form-hint muted");
   keyWrap.append(el("span", "form-label", "API key"), keyInput, keyHint);
   const mainGrid = el("div", "form-grid");
-  mainGrid.append(
-    formField("name", "e.g. ollama"),
-    formField("base_url", "http://localhost:11434/v1"),
-    formField("model", "e.g. nomic-embed-text"),
-    keyWrap,
-  );
-  const advanced = el("details", "advanced");
-  advanced.append(el("summary", undefined, "Advanced"));
-  const advGrid = el("div", "form-grid");
+  mainGrid.append(formField("name", "e.g. ollama"), formField("base_url", "http://localhost:11434/v1"), formField("model", "e.g. nomic-embed-text"), keyWrap);
+  const hostWarning = el("div", "note warn");
+  hostWarning.hidden = true;
+  const advToggle = el("button", "link icon-link advanced-toggle");
+  advToggle.type = "button";
+  advToggle.setAttribute("aria-expanded", "false");
+  const advGrid = el("div", "form-grid advanced");
   for (const f of NUMBER_FIELDS) advGrid.append(formField(f, "default"));
   advGrid.append(
     formField("query_prefix", "", "Prepended to search queries"),
     formField("doc_prefix", "", "Prepended to indexed code"),
     formField("api_key_env", "e.g. OPENAI_API_KEY", "Read the key from this variable instead"),
   );
-  advanced.append(advGrid);
+  function setAdvanced(open: boolean): void {
+    advGrid.hidden = !open;
+    advToggle.setAttribute("aria-expanded", String(open));
+    advToggle.textContent = "";
+    advToggle.append(icon(open ? "chevron-down" : "chevron-right"), "Advanced");
+  }
+  advToggle.addEventListener("click", () => setAdvanced(advGrid.hidden));
   const formActions = el("div", "form-actions");
-  const saveBtn = button("Save", { icon: "check" });
-  saveBtn.type = "submit";
+  const saveUseBtn = button("Save and use", { icon: "check" });
+  saveUseBtn.addEventListener("click", () => submit(true));
+  const saveBtn = button("Save", { secondary: true });
+  saveBtn.addEventListener("click", () => submit(false));
   const cancelBtn = button("Cancel", { secondary: true });
   cancelBtn.addEventListener("click", () => closeForm());
-  formActions.append(saveBtn, cancelBtn);
-  formCard.append(formTitle, presets, mainGrid, advanced, formActions);
-  for (const p of PRESETS) {
-    const b = el("button", "chip", p.label);
+  formActions.append(saveUseBtn, saveBtn, cancelBtn);
+  formCard.append(formTitle, presetSeg, mainGrid, hostWarning, advToggle, advGrid, formActions);
+
+  const presetButtons: HTMLButtonElement[] = [];
+  for (const p of [...PRESETS, undefined]) {
+    const b = el("button", undefined, p?.label ?? "Custom");
     b.type = "button";
+    b.setAttribute("role", "radio");
     b.addEventListener("click", () => {
-      if (!inputs.name.value) inputs.name.value = p.name;
-      inputs.base_url.value = p.base_url;
-      inputs.model.value = p.model;
-      (p.model ? keyInput : inputs.model).focus();
+      const presetNames = PRESETS.map((x) => x.name);
+      if (!inputs.name.value || presetNames.includes(inputs.name.value)) inputs.name.value = p?.name ?? "";
+      inputs.base_url.value = p?.base_url ?? "";
+      inputs.model.value = p?.model ?? "";
+      syncPreset();
+      (p ? (p.model ? keyInput : inputs.model) : inputs.name).focus();
     });
-    presets.append(b);
+    presetButtons.push(b);
+    presetSeg.append(b);
   }
+
+  function syncPreset(): void {
+    const url = inputs.base_url.value.trim();
+    const match = PRESETS.findIndex((p) => p.base_url === url);
+    presetButtons.forEach((b, i) => b.setAttribute("aria-checked", String(i === (match < 0 ? PRESETS.length : match))));
+    const remote = remoteHost(url);
+    hostWarning.hidden = remote === undefined;
+    hostWarning.textContent = "";
+    if (remote) hostWarning.append(icon("warning"), el("span", undefined, `${remote} is outside this machine. Indexing will send your code there after you confirm once for this project.`));
+  }
+  inputs.base_url.addEventListener("input", syncPreset);
 
   function openForm(row: ProviderRow | undefined): void {
     editing = { previousName: row?.name };
@@ -295,8 +421,12 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
     keyInput.value = "";
     keyHint.textContent = row?.hasKey ? "A key is stored. Leave empty to keep it." : "Stored in VS Code secret storage, never in settings.json.";
     formTitle.textContent = row ? `Edit ${row.name}` : "Add provider";
-    presets.hidden = row !== undefined;
-    advanced.open = TEXT_FIELDS.some((k) => f[k]) || NUMBER_FIELDS.some((k) => f[k]);
+    presetSeg.hidden = row !== undefined;
+    const active = String(value("embedding.provider") ?? "local");
+    saveUseBtn.hidden = row !== undefined && row.name === active;
+    saveBtn.classList.toggle("secondary", !saveUseBtn.hidden);
+    setAdvanced(TEXT_FIELDS.some((k) => f[k]) || NUMBER_FIELDS.some((k) => f[k]));
+    syncPreset();
     formCard.hidden = false;
     addBtn.hidden = true;
     inputs.name.focus();
@@ -309,8 +439,7 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
     addBtn.hidden = false;
   }
 
-  formCard.addEventListener("submit", (e) => {
-    e.preventDefault();
+  function submit(use: boolean): void {
     if (!editing || !state) return;
     const form = Object.fromEntries((Object.keys(inputs) as (keyof ProviderForm)[]).map((k) => [k, inputs[k].value])) as ProviderForm;
     const taken = state.providers.map((p) => p.name).filter((p) => p !== editing!.previousName);
@@ -322,12 +451,24 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
     }
     if (!res.ok) {
       const first = (Object.keys(res.errors) as (keyof ProviderForm)[])[0]!;
-      if (!(mainGrid.contains(inputs[first]))) advanced.open = true;
+      if (!mainGrid.contains(inputs[first])) setAdvanced(true);
       inputs[first].focus();
       return;
     }
-    post({ type: "saveProvider", previousName: editing.previousName, name: res.name, config: res.config, apiKey: keyInput.value || undefined });
+    post({
+      type: "saveProvider",
+      previousName: editing.previousName,
+      name: res.name,
+      config: res.config,
+      apiKey: keyInput.value || undefined,
+      ...(use ? { use } : {}),
+    });
     closeForm();
+  }
+
+  formCard.addEventListener("submit", (e) => {
+    e.preventDefault();
+    submit(!saveUseBtn.hidden);
   });
 
   function keyStatus(row: ProviderRow): HTMLElement | undefined {
@@ -337,36 +478,51 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
     return tag("No API key", { icon: "key", tone: "warn" });
   }
 
+  function consentLine(row: ProviderRow): HTMLElement | undefined {
+    if (!row.remote || !status || status.provider !== row.name) return undefined;
+    const line = el("div", "consent");
+    if (status.consentRequired) {
+      line.classList.add("warn");
+      const allow = el("button", "link", "Allow");
+      allow.type = "button";
+      allow.addEventListener("click", () => action("grantConsent"));
+      line.append(icon("warning"), el("span", undefined, `Needs your permission to send code from this project to ${status.consentRequired.host}`), allow);
+    } else {
+      line.append(icon("lock"), el("span", undefined, "Allowed to receive code from this project"));
+    }
+    return line;
+  }
+
   function renderProviders(): void {
     if (!state) return;
     providerList.textContent = "";
     const active = String(value("embedding.provider") ?? "local");
     for (const row of state.providers) {
       const isActive = row.name === active;
+      const local = row.name === "local";
       const card = el("div", `card provider${isActive ? " active" : ""}`);
-      const radio = el("button", "radio");
-      radio.type = "button";
-      radio.setAttribute("role", "radio");
-      radio.setAttribute("aria-checked", String(isActive));
-      radio.setAttribute("aria-label", `Use ${row.name}`);
-      radio.title = isActive ? "Active provider" : `Use ${row.name}`;
+      card.dataset.search = "";
+      const r = radio(isActive, `Use ${local ? "the built-in model" : row.name}`);
+      r.title = isActive ? "Active provider" : `Use ${row.name}`;
       const choose = () => {
         if (!isActive) post({ type: "useProvider", name: row.name });
       };
-      radio.addEventListener("click", choose);
+      r.addEventListener("click", choose);
       card.addEventListener("click", (e) => {
-        if (!(e.target as HTMLElement).closest("button, input, .key-editor")) choose();
+        if (!(e.target as HTMLElement).closest("button, input, .key-editor, .models")) choose();
       });
       const body = el("div", "provider-body");
       const title = el("div", "provider-title");
-      title.append(el("span", "provider-name", row.name === "local" ? "Built-in model" : row.name));
+      title.append(el("span", "provider-name", local ? "Built-in model" : row.name));
       title.append(row.remote ? tag(row.host ?? "remote", { icon: "cloud" }) : tag("on this machine", { icon: "vm" }));
       if (row.source === "user") title.append(tag("providers.toml", { icon: "file" }));
       const ks = keyStatus(row);
       if (ks) title.append(ks);
       body.append(title);
-      const meta = row.name === "local" ? `${String(value("model.id") ?? "")} · nothing leaves this machine` : [row.model, row.baseUrl].filter(Boolean).join(" · ");
+      const meta = local ? "Nothing leaves this machine" : [row.model, row.baseUrl].filter(Boolean).join(" · ");
       body.append(el("div", "provider-meta muted", meta));
+      const consent = consentLine(row);
+      if (consent) body.append(consent);
       const test = tests.get(row.name);
       if (test) {
         const t = el("div", `test-result${test.error ? " fail" : test.pending ? "" : " pass"}`);
@@ -376,6 +532,7 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
         body.append(t);
       }
       if (keyEditing === row.name) body.append(keyEditor(row));
+      if (local && isActive) body.append(modelsBlock());
       const actions = el("div", "provider-actions");
       const testBtn = iconButton("beaker", engine === "ready" ? "Test connection" : "Test connection (the engine is not running)");
       testBtn.disabled = engine !== "ready" || test?.pending === true;
@@ -416,9 +573,10 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
         });
         actions.append(edit, del);
       }
-      card.append(radio, body, actions);
+      card.append(r, body, actions);
       providerList.append(card);
     }
+    applyFilter();
   }
 
   function keyEditor(row: ProviderRow): HTMLElement {
@@ -452,12 +610,85 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
     return box;
   }
 
+  // ---- Local models, shown inside the built-in provider card
+  const modelFallback = el("input", "wide");
+  modelFallback.spellcheck = false;
+  modelFallback.setAttribute("aria-label", "Model id");
+  modelFallback.addEventListener("change", () => update("model.id", modelFallback.value.trim() || undefined));
+
+  function modelsBlock(): HTMLElement {
+    const box = el("div", "models");
+    const current = String(value("model.id") ?? "");
+    if (state!.models === null) {
+      box.append(el("div", "muted model-fallback-desc", "The model catalog is available once the engine is running."));
+      if (document.activeElement !== modelFallback) modelFallback.value = current;
+      box.append(modelFallback);
+    } else {
+      const table = el("div", "model-table");
+      table.setAttribute("role", "radiogroup");
+      table.setAttribute("aria-label", "Local model");
+      const head = el("div", "model-row model-head");
+      head.append(el("span"), el("span", undefined, "Model"), el("span", undefined, "Dims"), el("span", undefined, "Size"), el("span", undefined, "License"), el("span"));
+      table.append(head);
+      for (const m of state!.models) table.append(modelRow(m, m.id === current));
+      box.append(table);
+    }
+    const note = el("div", "note");
+    const chunks = status && status.chunks > 0 ? `${n(status.chunks)} chunks` : "all code";
+    note.append(icon("info"), el("span", undefined, `Switching the model re-embeds ${chunks}. Keyword search keeps working meanwhile.`));
+    box.append(note);
+    const archive = String(value("model.offlineArchive") ?? "");
+    const archiveRow = el("div", "archive-row");
+    if (archive) {
+      const path = el("span", "path", archive);
+      path.title = archive;
+      const change = el("button", "link", "Change…");
+      change.type = "button";
+      change.addEventListener("click", () => post({ type: "browseArchive" }));
+      const clear = iconButton("close", "Stop using the offline archive");
+      clear.addEventListener("click", () => update("model.offlineArchive", undefined));
+      archiveRow.append(el("span", "muted", "Offline archive:"), path, change, clear);
+    } else {
+      const browse = el("button", "link", "Install from offline archive…");
+      browse.type = "button";
+      browse.title = "Install the model from a local archive instead of downloading it. Useful on machines without internet access.";
+      browse.addEventListener("click", () => post({ type: "browseArchive" }));
+      archiveRow.append(browse);
+    }
+    box.append(archiveRow);
+    return box;
+  }
+
+  function modelRow(m: ModelListItem, isActive: boolean): HTMLElement {
+    const row = el("div", `model-row model${isActive ? " active" : ""}`);
+    const r = radio(isActive, `Use ${m.id}`);
+    const choose = () => {
+      if (!isActive) update("model.id", m.id);
+    };
+    r.addEventListener("click", choose);
+    row.addEventListener("click", (e) => {
+      if (e.target !== r) choose();
+    });
+    if (!isActive) row.title = m.installed ? `Use ${m.id}` : `Use ${m.id} (downloads ${formatMb(m.sizeMb)})`;
+    const name = el("span", "model-name", m.id);
+    if (m.isDefault) {
+      const star = icon("star-full", "model-default");
+      star.title = "Default model";
+      name.append(star);
+    }
+    const act = el("span", "model-action");
+    if (!m.installed) act.append(icon("cloud-download"), "Download");
+    row.append(r, name, el("span", undefined, String(m.dims)), el("span", undefined, formatMb(m.sizeMb)), el("span", "model-license", m.license), act);
+    return row;
+  }
+
   // ---- Field helpers
   function field(key: SettingKey, label: string, description: string, control: HTMLElement, set: (v: unknown) => void): FieldHandle {
     const f = el("div", "field");
     f.dataset.key = key;
+    f.dataset.search = "";
     const head = el("div", "field-head");
-    head.append(el("span", "field-label", label));
+    head.append(el("span", "field-label", label), el("span", "modified-label"));
     const reset = iconButton("discard", "Reset to default", "reset");
     reset.addEventListener("click", () => update(key, undefined));
     head.append(reset);
@@ -467,17 +698,24 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
     return h;
   }
 
-  function numberField(key: SettingKey, label: string, description: string, min: number, suffix?: string): HTMLElement {
+  function numberField(key: SettingKey, label: string, description: string, min: number, opts: { suffix?: string; auto?: boolean } = {}): HTMLElement {
     const wrap = el("div", "control-row");
     const input = el("input", "num");
     input.type = "number";
     input.min = String(min);
     input.step = "1";
+    if (opts.auto) input.placeholder = "Auto";
     wrap.append(input);
-    if (suffix) wrap.append(el("span", "muted", suffix));
+    if (opts.suffix) wrap.append(el("span", "muted", opts.suffix));
     const err = el("span", "form-error");
     wrap.append(err);
     const commit = () => {
+      if (opts.auto && input.value.trim() === "") {
+        input.classList.remove("invalid");
+        err.textContent = "";
+        if (value(key) !== 0) update(key, undefined);
+        return;
+      }
       const v = parseIntSetting(input.value, min);
       input.classList.toggle("invalid", v === undefined);
       err.textContent = v === undefined ? `Whole number, at least ${min}` : "";
@@ -489,77 +727,10 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
     });
     return field(key, label, description, wrap, (v) => {
       if (document.activeElement === input) return;
-      input.value = String(v ?? "");
+      input.value = opts.auto && (v === 0 || v === undefined) ? "" : String(v ?? "");
       input.classList.remove("invalid");
       err.textContent = "";
     }).root;
-  }
-
-  // ---- Local model
-  const modelSec = section("model", "Local model", "Used when the provider is the built-in model. Models are downloaded once and shared between projects.");
-  const modelNote = el("div", "note");
-  modelNote.append(icon("info"), el("span"));
-  const modelList = el("div", "list");
-  modelList.setAttribute("role", "radiogroup");
-  modelList.setAttribute("aria-label", "Local model");
-  const modelFallback = el("input");
-  modelFallback.spellcheck = false;
-  modelFallback.addEventListener("change", () => update("model.id", modelFallback.value.trim() || undefined));
-  const modelFallbackWrap = el("div", "field");
-  modelFallbackWrap.append(el("div", "field-label", "Model id"), el("div", "field-desc muted", "The model catalog is available once the engine is running."), modelFallback);
-  const archive = el("div", "control-row");
-  const archiveInput = el("input", "wide");
-  archiveInput.placeholder = "Not set: models are downloaded";
-  archiveInput.spellcheck = false;
-  archiveInput.addEventListener("change", () => update("model.offlineArchive", archiveInput.value.trim() || undefined));
-  const browse = button("Browse…", { icon: "folder-opened", secondary: true });
-  browse.addEventListener("click", () => post({ type: "browseArchive" }));
-  archive.append(archiveInput, browse);
-  modelSec.append(modelNote, modelList, modelFallbackWrap);
-  modelSec.append(
-    field("model.offlineArchive", "Offline archive", "Install the model from a local archive instead of downloading it. Useful on machines without internet access.", archive, (v) => {
-      if (document.activeElement !== archiveInput) archiveInput.value = String(v ?? "");
-    }).root,
-  );
-
-  function renderModels(): void {
-    if (!state) return;
-    const active = String(value("embedding.provider") ?? "local");
-    const note = modelNote.querySelector("span")!;
-    modelNote.hidden = active === "local";
-    note.textContent = `Not in use: the active provider is ${active}.`;
-    modelSec.classList.toggle("inactive", active !== "local");
-    const current = String(value("model.id") ?? "");
-    modelList.textContent = "";
-    modelList.hidden = state.models === null;
-    modelFallbackWrap.hidden = state.models !== null;
-    if (document.activeElement !== modelFallback) modelFallback.value = current;
-    for (const m of state.models ?? []) modelList.append(modelCard(m, m.id === current));
-  }
-
-  function modelCard(m: ModelListItem, isActive: boolean): HTMLElement {
-    const card = el("div", `card model${isActive ? " active" : ""}`);
-    const radio = el("button", "radio");
-    radio.type = "button";
-    radio.setAttribute("role", "radio");
-    radio.setAttribute("aria-checked", String(isActive));
-    radio.setAttribute("aria-label", `Use ${m.id}`);
-    const choose = () => {
-      if (!isActive) update("model.id", m.id);
-    };
-    radio.addEventListener("click", choose);
-    card.addEventListener("click", (e) => {
-      if (e.target !== radio) choose();
-    });
-    if (!isActive) card.title = m.installed ? `Use ${m.id}` : `Use ${m.id} (downloads ${formatMb(m.sizeMb)})`;
-    const body = el("div", "provider-body");
-    const title = el("div", "provider-title");
-    title.append(el("span", "provider-name", m.id));
-    if (m.isDefault) title.append(tag("default", { icon: "star-full" }));
-    title.append(m.installed ? tag("installed", { icon: "pass", tone: "ok" }) : tag(`downloads ${formatMb(m.sizeMb)}`, { icon: "cloud-download" }));
-    body.append(title, el("div", "provider-meta muted", `${m.dims} dimensions · ${formatMb(m.sizeMb)} · ${m.license}`));
-    card.append(radio, body);
-    return card;
   }
 
   // ---- Index
@@ -585,8 +756,77 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
       locSelect.value = String(v ?? "auto");
       syncLocDesc();
     }).root,
-    numberField("index.maxFileKb", "Maximum file size", "Larger files are skipped.", 1, "KB"),
-    numberField("index.threads", "Threads", "Threads for the built-in model. 0 picks a value automatically.", 0),
+  );
+
+  let patterns: string[] = [];
+  let patternEdit: number | undefined;
+  const patternList = el("div", "pattern-list");
+  const addPattern = button("Add Pattern", { cls: "add-pattern" });
+  addPattern.addEventListener("click", () => {
+    patternEdit = patterns.length;
+    renderPatterns();
+  });
+  const patternWrap = el("div");
+  patternWrap.append(patternList, addPattern);
+  function commitPatterns(next: string[]): void {
+    patternEdit = undefined;
+    update("index.exclude", next.length > 0 ? next : undefined);
+  }
+  function renderPatterns(): void {
+    patternList.textContent = "";
+    const rows = patternEdit === patterns.length ? [...patterns, ""] : patterns;
+    rows.forEach((p, i) => {
+      const row = el("div", "pattern-row");
+      if (patternEdit === i) {
+        const input = el("input", "pattern-input");
+        input.value = p;
+        input.placeholder = "e.g. vendor/**";
+        input.spellcheck = false;
+        const ok = button("OK");
+        const cancel = button("Cancel", { secondary: true });
+        const save = () => {
+          const v = input.value.trim();
+          const next = [...patterns];
+          if (v) next[i] = v;
+          else next.splice(i, 1);
+          commitPatterns([...new Set(next)]);
+        };
+        ok.addEventListener("click", save);
+        cancel.addEventListener("click", () => {
+          patternEdit = undefined;
+          renderPatterns();
+        });
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") save();
+          if (e.key === "Escape") cancel.click();
+        });
+        row.classList.add("editing");
+        row.append(input, ok, cancel);
+        patternList.append(row);
+        queueMicrotask(() => input.focus());
+        return;
+      }
+      const edit = iconButton("edit", `Edit ${p}`);
+      edit.addEventListener("click", () => {
+        patternEdit = i;
+        renderPatterns();
+      });
+      const remove = iconButton("close", `Remove ${p}`);
+      remove.addEventListener("click", () => commitPatterns(patterns.filter((_, j) => j !== i)));
+      row.append(el("span", "pattern-text", p), edit, remove);
+      patternList.append(row);
+    });
+    patternList.hidden = rows.length === 0;
+    addPattern.hidden = patternEdit === patterns.length;
+  }
+  indexSec.append(
+    field("index.exclude", "Excluded files", "Glob patterns that are skipped in addition to .gitignore.", patternWrap, (v) => {
+      patterns = Array.isArray(v) ? v.map(String) : [];
+      patternEdit = undefined;
+      renderPatterns();
+    }).root,
+    numberField("index.maxFileKb", "Maximum file size", "Larger files are skipped.", 1, { suffix: "KB" }),
+    numberField("index.threads", "Threads", "Total threads for the built-in model across all windows and projects on this machine. Leave empty for automatic: half of the cores, at most 4.", 1, { auto: true }),
   );
   const batteryBox = el("label", "check-row");
   const battery = el("input");
@@ -609,7 +849,7 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
     const b = el("button");
     b.type = "button";
     b.setAttribute("role", "radio");
-    b.append(icon(MODE_INFO[m].icon), m[0]!.toUpperCase() + m.slice(1));
+    b.append(icon(MODE_INFO[m].icon), MODE_INFO[m].name);
     b.title = MODE_INFO[m].label;
     b.addEventListener("click", () => update("search.defaultMode", m));
     modeBtns.set(m, b);
@@ -619,7 +859,7 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
   const modeWrap = el("div");
   modeWrap.append(modeSeg, modeDesc);
   searchSec.append(
-    field("search.defaultMode", "Default mode", "The mode the search panel starts in. You can switch it next to the search box.", modeWrap, (v) => {
+    field("search.defaultMode", "Default mode", "The mode the search panel starts in. You can switch it under the search box.", modeWrap, (v) => {
       const mode = (v ?? "hybrid") as SearchMode;
       for (const [k, b] of modeBtns) b.setAttribute("aria-checked", String(k === mode));
       modeDesc.textContent = MODE_INFO[mode]?.label ?? "";
@@ -629,20 +869,25 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
 
   // ---- Integrations
   const intSec = section("integrations", "Integrations");
-  const integration = (ic: string, title: string, desc: string, label: string, action: "installCli" | "copyMcpConfig" | "showLog") => {
-    const row = el("div", "card integration");
+  const intCard = el("div", "card integrations");
+  intSec.append(intCard);
+  const integration = (ic: string, title: string, desc: string, end: HTMLElement) => {
+    const row = el("div", "integration");
+    row.dataset.search = "";
     const text = el("div", "integration-text");
-    const t = el("div", "integration-title");
-    t.append(icon(ic), el("span", undefined, title));
-    text.append(t, el("div", "muted", desc));
-    const b = button(label, { secondary: true });
-    b.addEventListener("click", () => post({ type: "action", action }));
-    row.append(text, b);
-    intSec.append(row);
+    text.append(el("div", "integration-title", title), el("div", "integration-desc muted", desc));
+    row.append(icon(ic, "integration-icon"), text, end);
+    intCard.append(row);
   };
-  integration("terminal", "Command line", "Install the code-embed CLI to search from the terminal and scripts.", "Install CLI", "installCli");
-  integration("plug", "MCP for agents", "Copy a config for Claude Code, Cursor and other MCP clients.", "Copy MCP config", "copyMcpConfig");
-  integration("output", "Log", "Engine output and indexing errors.", "Show log", "showLog");
+  const intButton = (label: string, a: SettingsAction) => {
+    const b = button(label, { secondary: true });
+    b.addEventListener("click", () => action(a));
+    return b;
+  };
+  integration("terminal", "Command line", "Install the code-embed CLI to search from the terminal and scripts.", intButton("Install CLI", "installCli"));
+  integration("plug", "MCP for agents", "Copy a config for Claude Code, Cursor and other MCP clients.", intButton("Copy MCP config", "copyMcpConfig"));
+  integration("zap", "Agent tools in VS Code", "#semsearch and #similar are available to chat agents.", tag("active", { icon: "pass", tone: "ok" }));
+  integration("output", "Log", "Engine output and indexing errors.", intButton("Show log", "showLog"));
 
   const toast = el("div", "toast");
   toast.hidden = true;
@@ -660,16 +905,23 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
   function renderState(): void {
     if (!state) return;
     const ws = state.scope === "workspace";
-    scopeUser.setAttribute("aria-checked", String(!ws));
-    scopeWs.setAttribute("aria-checked", String(ws));
+    scopeUser.setAttribute("aria-selected", String(!ws));
+    scopeWs.setAttribute("aria-selected", String(ws));
     scopeWs.disabled = !state.hasWorkspace;
     scopeWs.title = state.hasWorkspace ? "Save to this workspace (.vscode/settings.json)" : "Open a folder to use workspace settings";
-    scopeHint.textContent = ws ? "Changes are saved for this workspace" : "Changes are saved for all workspaces";
+    scopeHint.textContent = ws ? "Saved to .vscode/settings.json" : "Saved to user settings";
+    const counts = new Map<string, number>();
     for (const f of fields) {
       const info = state.settings[f.key];
       f.set(info.value);
       const here = ws ? info.workspace : info.user;
-      f.root.classList.toggle("modified", here !== undefined);
+      const modified = here !== undefined;
+      f.root.classList.toggle("modified", modified);
+      f.root.querySelector(".modified-label")!.textContent = modified ? `Modified in ${ws ? "Workspace" : "User"}` : "";
+      if (modified) {
+        const id = f.root.closest(".section")!.id;
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
       const note = f.root.querySelector<HTMLElement>(".field-note")!;
       note.textContent = "";
       note.classList.remove("info");
@@ -680,8 +932,13 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
         note.append(icon("info"), el("span", undefined, "Inherited from user settings"));
       }
     }
+    for (const [id, { count }] of tocLinks) {
+      const c = counts.get(id) ?? 0;
+      count.hidden = c === 0;
+      count.textContent = String(c);
+      count.title = `${c} modified in ${ws ? "Workspace" : "User"}`;
+    }
     renderProviders();
-    renderModels();
   }
 
   renderStatus();
@@ -694,6 +951,7 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
           state = msg.state;
           page.classList.add("loaded");
           renderState();
+          renderStatus();
           break;
         case "engine":
           engine = msg.engine;

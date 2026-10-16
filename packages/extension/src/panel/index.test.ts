@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,6 +34,8 @@ function setup() {
     state: "ready",
     lastStatus: undefined,
     rebuild: vi.fn(async () => undefined),
+    pause: vi.fn(async () => undefined),
+    resume: vi.fn(async () => undefined),
     findSimilar: vi.fn(async () => resp),
     onStatus: vi.fn(),
     search: vi.fn((_p: unknown, signal?: AbortSignal) => {
@@ -94,9 +96,17 @@ describe("panel host", () => {
     vi.spyOn(vscode.window, "setStatusBarMessage").mockReturnValue(undefined as never);
     await t.send({ type: "copy", text: "src/a.ts:3" });
     expect(write).toHaveBeenCalledWith("src/a.ts:3");
-    await t.send({ type: "similar", path: "src/a.ts", range: { startLine: 3, endLine: 9 } });
-    expect(t.client.findSimilar).toHaveBeenCalledWith({ path: "src/a.ts", range: { startLine: 3, endLine: 9 } });
-    expect(t.posted.at(-1)).toEqual({ type: "results", requestId: 0, query: "", response: resp, title: "Similar to src/a.ts:3-9" });
+    await t.send({ type: "similar", path: "src/a.ts", range: { startLine: 3, endLine: 9 }, symbol: "fn" });
+    expect(t.client.findSimilar).toHaveBeenCalledWith({ path: "src/a.ts", range: { startLine: 3, endLine: 9 }, exclude: ["src/a.ts"] });
+    expect(t.posted.at(-1)).toEqual({
+      type: "results",
+      requestId: 0,
+      query: "",
+      response: resp,
+      similar: { path: "src/a.ts", range: { startLine: 3, endLine: 9 }, symbol: "fn", lang: "typescript", lines: [], hideSameFile: true },
+    });
+    await t.send({ type: "similar", path: "src/a.ts", range: { startLine: 3, endLine: 9 }, hideSameFile: false });
+    expect(t.client.findSimilar).toHaveBeenLastCalledWith({ path: "src/a.ts", range: { startLine: 3, endLine: 9 } });
   });
 
   it("aborts on cancel and suppresses the response", async () => {
@@ -118,12 +128,16 @@ describe("panel host", () => {
     expect(t.posted.at(-1)).toEqual({ type: "error", requestId: 2, message: "boom" });
   });
 
-  it("queues showSimilar until the webview is ready", async () => {
+  it("queues similar results until the webview is ready and previews the source lines", async () => {
     const t = setup();
-    await t.provider.showSimilar("Similar", resp);
+    const repo = mkdtempSync(join(tmpdir(), "ce-panel-"));
+    mkdirSync(join(repo, ".git"));
+    writeFileSync(join(repo, "a.py"), "one\ntwo\nthree\nfour\n");
+    vi.spyOn(vscode.workspace, "workspaceFolders", "get").mockReturnValue([{ uri: vscode.Uri.file(repo) }] as never);
+    await t.provider.findSimilar("a.py", { startLine: 2, endLine: 4 });
     expect(t.posted).toHaveLength(0);
     await t.send({ type: "ready" });
-    expect(t.posted.at(-1)).toEqual({ type: "results", requestId: 0, query: "", response: resp, title: "Similar" });
+    expect(t.posted.at(-1)).toMatchObject({ type: "results", similar: { path: "a.py", symbol: null, lang: "python", lines: ["two", "three"] } });
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codeEmbed.panel.focus");
   });
 
@@ -135,6 +149,10 @@ describe("panel host", () => {
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith("codeEmbed.openSettings");
     await t.send({ type: "command", command: "index" });
     expect(t.client.rebuild).toHaveBeenCalledWith({ full: false });
+    await t.send({ type: "command", command: "pause" });
+    expect(t.client.pause).toHaveBeenCalled();
+    await t.send({ type: "command", command: "resume" });
+    expect(t.client.resume).toHaveBeenCalled();
     t.provider.clear();
     expect(t.posted.at(-1)).toEqual({ type: "clear" });
   });

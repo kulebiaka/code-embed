@@ -53,6 +53,7 @@ describe("extension manifest", () => {
         "codeEmbed.index.maxFileKb",
         "codeEmbed.index.threads",
         "codeEmbed.index.pauseOnBattery",
+        "codeEmbed.index.exclude",
         "codeEmbed.search.defaultMode",
         "codeEmbed.search.top",
         "codeEmbed.model.id",

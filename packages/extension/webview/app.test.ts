@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IndexStatus, SearchResponse, SearchResult } from "@code-embed/protocol/rpc";
-import type { WebviewToHost } from "../src/panel/messages";
+import type { SimilarSource, WebviewToHost } from "../src/panel/messages";
 import { createApp, type App } from "./app";
-import { bannerText, groupByFile, snippetWindow, splitGlobs } from "./logic";
+import { addRecent, groupByFile, indexBanner, snippetWindow, sourceLabel, splitGlobs } from "./logic";
 
 function result(path: string, startLine: number, over: Partial<SearchResult> = {}): SearchResult {
   return {
@@ -18,6 +18,15 @@ function result(path: string, startLine: number, over: Partial<SearchResult> = {
     ...over,
   };
 }
+
+const source: SimilarSource = {
+  path: "src/api/client.ts",
+  range: { startLine: 40, endLine: 72 },
+  symbol: "retryRequest",
+  lang: "typescript",
+  lines: ["export async function retryRequest(req: Request, max = 3) {", "  for (let i = 0; i <= max; i++) {"],
+  hideSameFile: true,
+};
 
 function resp(results: SearchResult[], partial = false): SearchResponse {
   return { results, partial, tookMs: 1 };
@@ -51,11 +60,33 @@ describe("logic", () => {
   });
 
   it("computes the banner", () => {
-    expect(bannerText(resp([]), status())).toBeUndefined();
-    expect(bannerText(resp([]), status({ embedded: 37 }))).toBe("Indexing 37% · partial results");
-    expect(bannerText(resp([], true), status({ embedded: 100 }))).toContain("keyword matches only");
-    expect(bannerText(resp([], true), undefined)).toContain("keyword matches only");
-    expect(bannerText(resp([]), status({ embedded: 0, lexicalOnly: true }))).toBeUndefined();
+    expect(indexBanner(resp([]), status())).toBeUndefined();
+    expect(indexBanner(resp([]), status({ embedded: 37, phase: "vector" }))).toEqual({
+      kind: "indexing",
+      title: "Building meaning index",
+      detail: "Keyword matches are complete. Meaning matches cover 37 of 100 chunks so far.",
+      percent: 37,
+    });
+    expect(indexBanner(resp([]), status({ embedded: 37, phase: "paused" }))).toMatchObject({ kind: "paused", title: "Meaning index paused" });
+    expect(indexBanner(resp([]), status({ embedded: 37, phase: "queued" }))).toMatchObject({ kind: "indexing", title: "Meaning index waits for another project" });
+    expect(indexBanner(resp([], true), status({ embedded: 100 }))?.title).toContain("keyword matches only");
+    expect(indexBanner(resp([], true), undefined)?.kind).toBe("partial");
+    expect(indexBanner(resp([]), status({ embedded: 0, lexicalOnly: true }))).toBeUndefined();
+  });
+
+  it("labels match sources and keeps recent queries unique and short", () => {
+    expect(sourceLabel(["lexical", "semantic"])).toBe("meaning + keywords");
+    expect(sourceLabel(["semantic"])).toBe("meaning");
+    expect(sourceLabel(["lexical"])).toBe("keywords");
+    let list = addRecent([], { query: "a", mode: "hybrid" });
+    list = addRecent(list, { query: "b", mode: "lexical" });
+    list = addRecent(list, { query: "a", mode: "semantic" });
+    expect(list).toEqual([
+      { query: "a", mode: "semantic" },
+      { query: "b", mode: "lexical" },
+    ]);
+    for (let i = 0; i < 10; i++) list = addRecent(list, { query: `q${i}`, mode: "hybrid" });
+    expect(list).toHaveLength(5);
   });
 
   it("splits globs", () => {
@@ -164,24 +195,47 @@ describe("app", () => {
     expect(sent.at(-1)).toMatchObject({ type: "open", path: "a.ts" });
   });
 
-  it("shows banner from status and partial responses", () => {
+  it("shows indexing progress with a pause button and the percentage on Semantic", () => {
     const banner = () => root.querySelector<HTMLElement>(".banner")!;
+    const semantic = () => root.querySelector<HTMLElement>('.mode[data-mode="semantic"]')!;
     expect(banner().hidden).toBe(true);
-    app.handle({ type: "status", status: status({ embedded: 50 }) });
+    app.handle({ type: "status", status: status({ embedded: 50, phase: "vector" }) });
     expect(banner().hidden).toBe(false);
-    expect(banner().textContent).toBe("Indexing 50% · partial results");
+    expect(banner().querySelector(".banner-title")!.textContent).toBe("Building meaning index");
+    expect(banner().querySelector(".banner-pct")!.textContent).toBe("50%");
+    expect(semantic().textContent).toBe("Semantic50%");
+    banner().querySelector<HTMLButtonElement>(".banner-pause")!.click();
+    expect(sent.at(-1)).toEqual({ type: "command", command: "pause" });
+    app.handle({ type: "status", status: status({ embedded: 50, phase: "paused" }) });
+    banner().querySelector<HTMLButtonElement>(".banner-pause")!.click();
+    expect(sent.at(-1)).toEqual({ type: "command", command: "resume" });
     app.handle({ type: "status", status: status() });
     expect(banner().hidden).toBe(true);
+    expect(semantic().textContent).toBe("Semantic");
   });
 
-  it("shows a titled similar-results view and cancels in-flight search", () => {
+  it("shows the similar-code source card and cancels in-flight search", () => {
     type("foo");
     vi.advanceTimersByTime(250);
     const id = searches()[0]!.requestId;
-    app.handle({ type: "results", requestId: 0, query: "", response: resp([result("s.ts", 1)]), title: "Similar to x" });
+    app.handle({ type: "results", requestId: 0, query: "", response: resp([result("s.ts", 1, { score: 1 }), result("t.ts", 5, { score: 0.5 })]), similar: source });
     expect(sent).toContainEqual({ type: "cancel", requestId: id });
-    expect(root.querySelector<HTMLElement>(".title")!.textContent).toBe("Similar to x");
-    expect(root.textContent).toContain("s.ts");
+    const card = root.querySelector<HTMLElement>(".similar-card")!;
+    expect(card.hidden).toBe(false);
+    expect(card.querySelector(".similar-symbol")!.textContent).toBe("retryRequest");
+    expect(card.querySelector(".similar-where")!.textContent).toBe("src/api/client.ts · 40–72");
+    expect(card.querySelector(".more-lines")!.textContent).toBe("+31 more lines");
+    expect([...root.querySelectorAll(".similarity")].map((e) => [e.textContent, e.classList.contains("weak")])).toEqual([
+      ["100%", false],
+      ["50%", true],
+    ]);
+    expect(root.querySelector(".source")).toBeNull();
+    expect(root.querySelector(".summary")!.textContent).toBe("2 similar chunks in 2 files · 1 ms");
+    const hide = card.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(hide.checked).toBe(true);
+    hide.checked = false;
+    hide.dispatchEvent(new Event("change"));
+    expect(sent.at(-1)).toEqual({ type: "similar", path: "src/api/client.ts", range: { startLine: 40, endLine: 72 }, symbol: "retryRequest", hideSameFile: false });
   });
 
   it("runs a query pushed by the host immediately", () => {
@@ -297,7 +351,7 @@ describe("app", () => {
     actions[1]!.click();
     expect(sent.at(-1)).toEqual({ type: "copy", text: "a.ts:3" });
     actions[2]!.click();
-    expect(sent.at(-1)).toEqual({ type: "similar", path: "a.ts", range: { startLine: 3, endLine: 4 } });
+    expect(sent.at(-1)).toEqual({ type: "similar", path: "a.ts", range: { startLine: 3, endLine: 4 }, symbol: "fn3", hideSameFile: true });
 
     const nodes = root.querySelectorAll<HTMLElement>(".result");
     key(input(), "ArrowDown");
@@ -323,24 +377,79 @@ describe("app", () => {
     expect(root.querySelector(".result.selected")).toBeNull();
   });
 
-  it("summarises hidden filters and clears them", () => {
+  it("shows active filters as removable chips", () => {
     const include = root.querySelector<HTMLInputElement>(".include")!;
-    const summaryEl = root.querySelector<HTMLElement>(".filter-summary")!;
-    include.value = "src/**";
+    const exclude = root.querySelector<HTMLInputElement>(".exclude")!;
+    const chips = root.querySelector<HTMLElement>(".filter-chips")!;
+    expect(chips.hidden).toBe(true);
+    include.value = "src/**, lib/**";
     include.dispatchEvent(new Event("input"));
-    expect(summaryEl.hidden).toBe(false);
-    expect(summaryEl.textContent).toBe("src/**");
+    exclude.value = "**/*.test.ts";
+    exclude.dispatchEvent(new Event("input"));
+    expect(chips.hidden).toBe(false);
+    expect([...chips.querySelectorAll(".chip-label")].map((c) => c.textContent)).toEqual(["src/**", "lib/**", "not **/*.test.ts"]);
     type("foo");
-    summaryEl.querySelector<HTMLButtonElement>(".icon-btn")!.click();
-    expect(include.value).toBe("");
-    expect(summaryEl.hidden).toBe(true);
-    expect(searches().at(-1)).toMatchObject({ include: [] });
+    chips.querySelector<HTMLButtonElement>(".chip-remove")!.click();
+    expect(include.value).toBe("lib/**");
+    expect(searches().at(-1)).toMatchObject({ include: ["lib/**"], exclude: ["**/*.test.ts"] });
+    chips.querySelector<HTMLButtonElement>(".add-filter")!.click();
+    expect(root.querySelector<HTMLElement>(".filters")!.hidden).toBe(false);
+    expect(chips.hidden).toBe(true);
   });
 
   it("closes the similar-results view and returns to the search", () => {
-    app.handle({ type: "results", requestId: 0, query: "", response: resp([result("s.ts", 1)]), title: "Similar to x" });
-    root.querySelector<HTMLButtonElement>(".title-bar .icon-btn")!.click();
-    expect(root.querySelector<HTMLElement>(".title-bar")!.hidden).toBe(true);
+    app.handle({ type: "results", requestId: 0, query: "", response: resp([result("s.ts", 1)]), similar: source });
+    root.querySelector<HTMLButtonElement>(".similar-close")!.click();
+    expect(root.querySelector<HTMLElement>(".similar-card")!.hidden).toBe(true);
     expect(root.querySelectorAll(".result")).toHaveLength(0);
+  });
+
+  it("hides code, flattens the list and collapses all groups", () => {
+    type("foo");
+    vi.advanceTimersByTime(250);
+    app.handle({ type: "results", requestId: searches()[0]!.requestId, query: "foo", response: resp([result("a.ts", 1, { score: 1 }), result("b.ts", 2, { score: 0.25 })]) });
+    const list = root.querySelector<HTMLElement>(".results")!;
+    expect([...root.querySelectorAll<HTMLElement>(".score > span")].map((s) => s.style.width)).toEqual(["100%", "25%"]);
+    expect(root.querySelector(".source")!.textContent).toBe("meaning + keywords");
+    root.querySelector<HTMLButtonElement>(".toggle-code")!.click();
+    expect(list.classList.contains("no-code")).toBe(true);
+    const collapse = root.querySelector<HTMLButtonElement>(".collapse-all")!;
+    collapse.click();
+    expect(root.querySelectorAll(".group.collapsed")).toHaveLength(2);
+    expect(collapse.title).toBe("Expand all");
+    collapse.click();
+    expect(root.querySelectorAll(".group.collapsed")).toHaveLength(0);
+    root.querySelector<HTMLElement>(".file")!.click();
+    root.querySelector<HTMLButtonElement>(".toggle-view")!.click();
+    expect(list.classList.contains("flat")).toBe(true);
+    expect(collapse.hidden).toBe(true);
+    input().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(root.querySelector(".result.selected .symbol")!.textContent).toBe("fn1");
+  });
+
+  it("remembers queries with their mode and runs them again", () => {
+    const state: { recent?: unknown } = {};
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById("app")!;
+    app = createApp(root, { postMessage: (m) => sent.push(m), getState: () => state, setState: (s) => Object.assign(state, s) });
+    app.handle({ type: "engine", state: "ready" });
+    app.handle({ type: "status", status: status() });
+    root.querySelector<HTMLButtonElement>('.mode[data-mode="lexical"]')!.click();
+    type("parseConfig");
+    input().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(state.recent).toEqual([{ query: "parseConfig", mode: "lexical" }]);
+    app.handle({ type: "clear" });
+    root.querySelector<HTMLButtonElement>('.mode[data-mode="hybrid"]')!.click();
+    const row = root.querySelector<HTMLButtonElement>(".recent")!;
+    expect(row.querySelector(".recent-query")!.textContent).toBe("parseConfig");
+    row.click();
+    expect(searches().at(-1)).toMatchObject({ query: "parseConfig", mode: "lexical" });
+    app.handle({ type: "clear" });
+    root.querySelector<HTMLButtonElement>(".recent-remove")!.click();
+    expect(state.recent).toEqual([]);
+    expect(root.querySelector(".recent")).toBeNull();
+    expect(root.querySelector(".index-state")!.textContent).toBe("Index ready");
+    expect(root.querySelector(".index-model")!.textContent).toBe("m · on this machine");
+    expect(root.querySelectorAll(".keys kbd")).toHaveLength(4);
   });
 });

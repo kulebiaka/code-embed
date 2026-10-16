@@ -40,7 +40,7 @@ export function registerCommands(ctx: vscode.ExtensionContext, deps: CommandDeps
 
   reg("codeEmbed.focus", () => panel.focus());
   reg("codeEmbed.quickSearch", () => quickSearch(client));
-  reg("codeEmbed.findSimilar", () => findSimilar(client, panel));
+  reg("codeEmbed.findSimilar", () => findSimilar(panel));
   reg("codeEmbed.reindex", async () => {
     const pick = await vscode.window.showQuickPick(
       [
@@ -162,7 +162,7 @@ function quickSearch(client: EngineClient): void {
   qp.show();
 }
 
-async function findSimilar(client: EngineClient, panel: PanelController): Promise<void> {
+async function findSimilar(panel: PanelController): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     void vscode.window.showWarningMessage("Code Embed: open a file and select code first.");
@@ -175,8 +175,7 @@ async function findSimilar(client: EngineClient, panel: PanelController): Promis
     void vscode.window.showWarningMessage("Code Embed: the file is outside the project root.");
     return;
   }
-  const resp = await client.findSimilar({ path: rel, range });
-  await panel.showSimilar(`Similar to ${rel}:${range.startLine}-${range.endLine}`, resp);
+  await panel.findSimilar(rel, range);
 }
 
 async function installCli(ctx: vscode.ExtensionContext): Promise<void> {

@@ -22,6 +22,8 @@ export interface Watcher {
 
 type Kind = "created" | "changed" | "deleted";
 
+export const MASS_THRESHOLD = 200;
+
 export interface Aggregator {
   add(kind: Kind, path: string): void;
   flush(): Promise<void>;
@@ -121,7 +123,7 @@ export async function startWatcher(opts: WatcherOptions): Promise<Watcher | null
 
   const agg = createAggregator({
     debounceMs: opts.debounceMs ?? 500,
-    massThreshold: opts.massThreshold ?? 200,
+    massThreshold: opts.massThreshold ?? MASS_THRESHOLD,
     isIgnored,
     onBatch: opts.onBatch,
   });

@@ -29,6 +29,7 @@ export function statusBarView(state: ClientState, s: IndexStatus | undefined): S
   if (s.phase === "error" || s.lastError) return wrap("error", details, true);
   if (s.lexicalOnly) return wrap("lexical only", details);
   if (s.phase === "paused") return wrap("paused", details);
+  if (s.phase === "queued") return wrap("queued", `${details}\nWaiting for another project to finish with the local model.`);
   if (s.phase === "idle") return wrap("idle", details);
   if (s.phase === "model-download") return wrap("downloading model", details);
   const pct = s.chunks > 0 ? Math.min(100, Math.floor((s.embedded / s.chunks) * 100)) : 0;

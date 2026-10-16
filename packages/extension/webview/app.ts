@@ -2,19 +2,25 @@ import hljs from "highlight.js/lib/common";
 import type { IndexStatus, SearchMode, SearchResponse, SearchResult } from "@code-embed/protocol/rpc";
 import { SEARCH_MODES } from "@code-embed/protocol/rpc";
 import type { ClientState } from "../src/engine/types";
-import type { HostToWebview, WebviewToHost } from "../src/panel/messages";
+import type { HostToWebview, SimilarSource, WebviewToHost } from "../src/panel/messages";
 import { button, el, icon, iconButton } from "./dom";
 import {
-  bannerText,
+  addRecent,
   createDebouncer,
   DEBOUNCE_MS,
   embeddedPercent,
   EXAMPLE_QUERIES,
   groupByFile,
+  indexBanner,
+  indexState,
   indexSummary,
   kindIcon,
+  meaningIncomplete,
   MODE_INFO,
+  modelLabel,
+  type RecentQuery,
   snippetWindow,
+  sourceLabel,
   splitGlobs,
   splitPath,
   summaryText,
@@ -22,11 +28,15 @@ import {
 
 export interface HostApi {
   postMessage(msg: WebviewToHost): void;
+  getState?(): unknown;
+  setState?(state: unknown): void;
 }
 
 export interface App {
   handle(msg: HostToWebview): void;
 }
+
+const WEAK_SIMILARITY = 0.75;
 
 function wrapMatches(line: HTMLElement, spans: { start: number; end: number }[]): void {
   if (spans.length === 0) return;
@@ -67,34 +77,65 @@ function renderLine(text: string, lang: string | null, spans: { start: number; e
   return code;
 }
 
-function renderSnippet(r: SearchResult): HTMLElement {
+function codeBlock(lines: { no: number; text: string; spans: { start: number; end: number }[] }[], lang: string | null, hidden: number): HTMLElement {
   const pre = el("div", "snippet");
-  const all = r.snippet.text.split("\n");
-  const firstMatch = r.snippet.highlights.reduce<number | undefined>((m, h) => (m === undefined || h.line < m ? h.line : m), undefined);
-  const { from, to } = snippetWindow(all.length, firstMatch);
-  for (let i = from; i < to; i++) {
+  for (const l of lines) {
     const row = el("div", "line");
-    row.append(el("span", "line-no", String(r.snippet.startLine + i)));
-    const spans = r.snippet.highlights.filter((h) => h.line === i);
-    row.append(renderLine(all[i]!, r.lang, spans));
+    row.append(el("span", "line-no", String(l.no)), renderLine(l.text, lang, l.spans));
     pre.append(row);
   }
-  const hidden = r.range.endLine - r.range.startLine + 1 - (to - from);
   if (hidden > 0) pre.append(el("div", "more-lines", `+${hidden} more line${hidden === 1 ? "" : "s"}`));
   return pre;
 }
 
-function sourceBadge(r: SearchResult): HTMLElement {
+function renderSnippet(r: SearchResult): HTMLElement {
+  const all = r.snippet.text.split("\n");
+  const firstMatch = r.snippet.highlights.reduce<number | undefined>((m, h) => (m === undefined || h.line < m ? h.line : m), undefined);
+  const { from, to } = snippetWindow(all.length, firstMatch);
+  const lines = [];
+  for (let i = from; i < to; i++) lines.push({ no: r.snippet.startLine + i, text: all[i]!, spans: r.snippet.highlights.filter((h) => h.line === i) });
+  return codeBlock(lines, r.lang, r.range.endLine - r.range.startLine + 1 - (to - from));
+}
+
+function sourceTag(r: SearchResult): HTMLElement {
   const lex = r.sources.includes("lexical");
   const sem = r.sources.includes("semantic");
   const kind = lex && sem ? "both" : lex ? "lexical" : "semantic";
-  const label = lex && sem ? "Matched by meaning and keywords" : lex ? "Matched by keywords" : "Matched by meaning";
-  const badge = el("span", `source source-${kind}`);
-  if (sem) badge.append(icon(MODE_INFO.semantic.icon));
-  if (lex) badge.append(icon(MODE_INFO.lexical.icon));
-  badge.title = label;
-  badge.setAttribute("aria-label", label);
-  return badge;
+  const tag = el("span", `tag source source-${kind}`, sourceLabel(r.sources));
+  tag.title = lex && sem ? "Matched by meaning and keywords" : lex ? "Matched by keywords" : "Matched by meaning";
+  return tag;
+}
+
+function scoreBar(score: number, top: number): HTMLElement {
+  const bar = el("span", "score");
+  const fill = el("span");
+  const pct = top > 0 ? Math.round((score / top) * 100) : 0;
+  fill.style.width = `${pct}%`;
+  bar.title = `Relevance ${pct}% of the best match`;
+  bar.append(fill);
+  return bar;
+}
+
+function keyHints(): HTMLElement {
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  const row = el("div", "keys");
+  const hints: [string, string][] = [
+    ["↑↓", "results"],
+    ["⏎", "open"],
+    [mac ? "⌘⏎" : "Ctrl+⏎", "to the side"],
+    [mac ? "⌥↑↓" : "Alt+↑↓", "mode"],
+  ];
+  for (const [k, label] of hints) {
+    const hint = el("span", "key-hint");
+    hint.append(el("kbd", undefined, k), label);
+    row.append(hint);
+  }
+  return row;
+}
+
+function loadRecent(host: HostApi): RecentQuery[] {
+  const s = host.getState?.() as { recent?: RecentQuery[] } | undefined;
+  return Array.isArray(s?.recent) ? s.recent.filter((r) => typeof r.query === "string" && SEARCH_MODES.includes(r.mode)) : [];
 }
 
 export function createApp(root: HTMLElement, host: HostApi): App {
@@ -108,6 +149,8 @@ export function createApp(root: HTMLElement, host: HostApi): App {
   let status: IndexStatus | undefined;
   let engine: ClientState | undefined;
   let lastResponse: SearchResponse | undefined;
+  let similar: SimilarSource | undefined;
+  let recent = loadRecent(host);
   let items: { result: SearchResult; node: HTMLElement; group: HTMLElement }[] = [];
   let selected = -1;
 
@@ -116,14 +159,24 @@ export function createApp(root: HTMLElement, host: HostApi): App {
   input.type = "text";
   input.setAttribute("aria-label", "Search query");
   input.spellcheck = false;
+  const box = el("div", "search-box");
+  box.append(input);
+
+  const filterToggle = iconButton("ellipsis", "Toggle filters", "filter-toggle");
+  filterToggle.setAttribute("aria-expanded", "false");
 
   const modes = el("div", "modes");
   modes.setAttribute("role", "group");
   modes.setAttribute("aria-label", "Search mode");
   const modeButtons = new Map<SearchMode, HTMLButtonElement>();
+  const semanticPct = el("span", "mode-pct");
   for (const m of SEARCH_MODES) {
-    const b = iconButton(MODE_INFO[m].icon, `${MODE_INFO[m].label} (Alt+Up/Down to switch)`, "mode");
+    const b = el("button", "mode");
+    b.type = "button";
     b.dataset.mode = m;
+    b.title = `${MODE_INFO[m].label} (Alt+Up/Down to switch)`;
+    b.append(icon(MODE_INFO[m].icon), el("span", undefined, MODE_INFO[m].name));
+    if (m === "semantic") b.append(semanticPct);
     b.addEventListener("click", () => {
       setMode(m);
       debounce.flush();
@@ -131,13 +184,6 @@ export function createApp(root: HTMLElement, host: HostApi): App {
     modeButtons.set(m, b);
     modes.append(b);
   }
-  const box = el("div", "search-box");
-  box.append(input, modes);
-
-  const filterToggle = iconButton("filter", "Toggle filters", "filter-toggle");
-  filterToggle.setAttribute("aria-expanded", "false");
-  const searchRow = el("div", "search-row");
-  searchRow.append(box, filterToggle);
 
   const filterInput = (cls: string, label: string, placeholder: string) => {
     const wrap = el("label", "filter-field");
@@ -157,34 +203,41 @@ export function createApp(root: HTMLElement, host: HostApi): App {
   const filters = el("div", "filters");
   filters.hidden = true;
   filters.append(inc.wrap, exc.wrap, lng.wrap);
-
-  const filterSummary = el("div", "filter-summary");
-  filterSummary.hidden = true;
-  const filterSummaryText = el("button", "filter-summary-text");
-  filterSummaryText.type = "button";
-  filterSummaryText.title = "Edit filters";
-  const clearFilters = iconButton("close", "Clear filters");
-  filterSummary.append(icon("filter"), filterSummaryText, clearFilters);
+  const chips = el("div", "filter-chips");
+  chips.hidden = true;
+  const filterBar = el("div", "filter-bar");
+  filterBar.append(chips, filterToggle);
 
   const busy = el("div", "busy");
   busy.append(el("div"));
+
   const banner = el("div", "banner");
   banner.hidden = true;
   const bannerIcon = el("span");
-  const bannerLabel = el("span", "banner-text");
-  const bannerMeter = el("div", "banner-meter");
+  const bannerTitle = el("span", "banner-title");
+  const bannerPct = el("span", "banner-pct");
+  const bannerPause = iconButton("debug-pause", "Pause indexing", "banner-pause");
+  const bannerHead = el("div", "banner-head");
+  bannerHead.append(bannerIcon, bannerTitle, bannerPct, bannerPause);
+  const bannerMeter = el("div", "meter");
   const bannerFill = el("div");
   bannerMeter.append(bannerFill);
-  banner.append(bannerIcon, bannerLabel, bannerMeter);
+  const bannerDetail = el("div", "banner-detail");
+  banner.append(bannerHead, bannerMeter, bannerDetail);
 
-  const titleBar = el("div", "title-bar");
-  titleBar.hidden = true;
-  const heading = el("span", "title");
-  const closeTitle = iconButton("close", "Back to search");
-  titleBar.append(icon("references"), heading, closeTitle);
+  const similarCard = el("div", "similar-card");
+  similarCard.hidden = true;
 
-  const summary = el("div", "summary");
-  summary.hidden = true;
+  const summaryBar = el("div", "summary-bar");
+  summaryBar.hidden = true;
+  const summary = el("span", "summary");
+  const codeToggle = iconButton("symbol-snippet", "Hide code", "toggle-code");
+  codeToggle.setAttribute("aria-pressed", "false");
+  const viewToggle = iconButton("list-flat", "View as list", "toggle-view");
+  viewToggle.setAttribute("aria-pressed", "false");
+  const collapseAll = iconButton("collapse-all", "Collapse all", "collapse-all");
+  summaryBar.append(summary, codeToggle, viewToggle, collapseAll);
+
   const message = el("div", "message");
   message.hidden = true;
   const empty = el("div", "empty");
@@ -194,8 +247,8 @@ export function createApp(root: HTMLElement, host: HostApi): App {
   more.hidden = true;
 
   const header = el("div", "header");
-  header.append(searchRow, filterSummary, filters, busy);
-  root.append(header, banner, titleBar, summary, message, empty, list, more);
+  header.append(box, modes, filterBar, filters, busy);
+  root.append(header, banner, similarCard, summaryBar, message, empty, list, more);
 
   function setMode(m: SearchMode): void {
     mode = m;
@@ -204,20 +257,52 @@ export function createApp(root: HTMLElement, host: HostApi): App {
   }
   setMode(mode);
 
+  function remember(query: string): void {
+    if (!query) return;
+    recent = addRecent(recent, { query, mode });
+    host.setState?.({ recent });
+  }
+
   function filtersActive(): boolean {
     return [include, exclude, lang].some((f) => f.value.trim() !== "");
+  }
+
+  function removeGlob(f: HTMLInputElement, glob: string): void {
+    f.value = splitGlobs(f.value)
+      .filter((g) => g !== glob)
+      .join(", ");
+  }
+
+  function renderChips(): void {
+    chips.textContent = "";
+    const parts = [
+      ...splitGlobs(include.value).map((g) => ({ label: g, remove: () => removeGlob(include, g) })),
+      ...splitGlobs(exclude.value).map((g) => ({ label: `not ${g}`, remove: () => removeGlob(exclude, g) })),
+      ...(lang.value.trim() ? [{ label: lang.value.trim(), remove: () => (lang.value = "") }] : []),
+    ];
+    chips.hidden = !filters.hidden || parts.length === 0;
+    for (const p of parts) {
+      const chip = el("span", "chip");
+      const remove = iconButton("close", `Remove filter ${p.label}`, "chip-remove");
+      remove.addEventListener("click", () => {
+        p.remove();
+        updateFilterToggle();
+        debounce.flush();
+      });
+      chip.append(el("span", "chip-label", p.label), remove);
+      chips.append(chip);
+    }
+    const add = el("button", "add-filter");
+    add.type = "button";
+    add.append(icon("add"), "Filter");
+    add.addEventListener("click", () => filterToggle.click());
+    chips.append(add);
   }
 
   function updateFilterToggle(): void {
     filterToggle.classList.toggle("active", filtersActive());
     filterToggle.setAttribute("aria-pressed", String(!filters.hidden));
-    const parts = [
-      ...splitGlobs(include.value),
-      ...splitGlobs(exclude.value).map((g) => `!${g}`),
-      ...(lang.value.trim() ? [lang.value.trim()] : []),
-    ];
-    filterSummary.hidden = !filters.hidden || parts.length === 0;
-    filterSummaryText.textContent = parts.join(", ");
+    renderChips();
   }
 
   function setBusy(on: boolean): void {
@@ -241,18 +326,63 @@ export function createApp(root: HTMLElement, host: HostApi): App {
   }
 
   function updateBanner(): void {
-    const text = bannerText(lastResponse, status);
-    banner.hidden = text === undefined;
-    bannerLabel.textContent = text ?? "";
-    const indexing = text !== undefined && !text.startsWith("Semantic");
-    banner.title = lastResponse?.partialReason ?? (indexing ? "Semantic matches cover only the part of the code embedded so far" : "");
-    bannerIcon.className = `codicon codicon-${indexing ? "sync spin" : "warning"}`;
-    bannerMeter.hidden = !indexing;
-    bannerFill.style.width = `${embeddedPercent(status)}%`;
+    const b = indexBanner(lastResponse, status);
+    semanticPct.textContent = meaningIncomplete(status) ? `${embeddedPercent(status)}%` : "";
+    banner.hidden = b === undefined;
+    if (!b) return;
+    banner.className = `banner banner-${b.kind}`;
+    bannerTitle.textContent = b.title;
+    bannerDetail.textContent = b.detail ?? "";
+    bannerDetail.hidden = !b.detail;
+    const progress = b.percent !== undefined;
+    bannerIcon.className = `codicon codicon-${b.kind === "indexing" ? "sync spin" : b.kind === "paused" ? "debug-pause" : "warning"}`;
+    bannerPct.textContent = progress ? `${b.percent}%` : "";
+    bannerMeter.hidden = !progress;
+    bannerFill.style.width = `${b.percent ?? 0}%`;
+    bannerPause.hidden = !progress;
+    const paused = b.kind === "paused";
+    const label = paused ? "Resume indexing" : "Pause indexing";
+    bannerPause.title = label;
+    bannerPause.setAttribute("aria-label", label);
+    bannerPause.firstElementChild!.className = `codicon codicon-${paused ? "debug-start" : "debug-pause"}`;
+  }
+
+  function section(title: string): HTMLElement {
+    return el("div", "empty-section", title);
+  }
+
+  function renderRecent(): HTMLElement | undefined {
+    if (recent.length === 0) return undefined;
+    const box = el("div", "recent-list");
+    for (const r of recent) {
+      const row = el("button", "recent");
+      row.type = "button";
+      row.title = `${r.query} (${MODE_INFO[r.mode].name})`;
+      const q = el("span", `recent-query${r.mode === "lexical" ? " mono" : ""}`, r.query);
+      const m = icon(MODE_INFO[r.mode].icon, "recent-mode");
+      const remove = iconButton("close", "Remove from recent", "recent-remove");
+      remove.tabIndex = -1;
+      remove.addEventListener("click", (e) => {
+        e.stopPropagation();
+        recent = recent.filter((x) => x.query !== r.query);
+        host.setState?.({ recent });
+        updateEmpty();
+      });
+      row.append(icon("history"), q, m, remove);
+      row.addEventListener("click", () => {
+        setMode(r.mode);
+        input.value = r.query;
+        remember(r.query);
+        debounce.flush();
+        input.focus();
+      });
+      box.append(row);
+    }
+    return box;
   }
 
   function updateEmpty(): void {
-    const show = !input.value.trim() && titleBar.hidden && lastResponse === undefined;
+    const show = !input.value.trim() && similar === undefined && lastResponse === undefined;
     empty.hidden = !show;
     if (!show) return;
     empty.textContent = "";
@@ -275,41 +405,42 @@ export function createApp(root: HTMLElement, host: HostApi): App {
       empty.append(idx);
       return;
     }
-    empty.append(el("div", "empty-title", "Describe what you are looking for, or type an identifier."));
-    const examples = el("ul", "examples");
+    const recentList = renderRecent();
+    if (recentList) empty.append(section("Recent"), recentList);
+    const examples = el("div", "examples");
     for (const q of EXAMPLE_QUERIES) {
-      const li = el("li");
-      const b = el("button", "link example", q);
+      const b = el("button", "chip example", q);
       b.type = "button";
       b.addEventListener("click", () => {
         input.value = q;
+        remember(q);
         debounce.flush();
         input.focus();
       });
-      li.append(icon("search"), b);
-      examples.append(li);
+      examples.append(b);
     }
-    empty.append(examples);
-    const legend = el("div", "legend");
-    for (const m of SEARCH_MODES) {
-      const row = el("div");
-      row.append(icon(MODE_INFO[m].icon), el("span", undefined, MODE_INFO[m].label));
-      legend.append(row);
-    }
-    empty.append(legend);
+    empty.append(section("Try"), examples);
     if (status) {
+      const st = indexState(status);
       const foot = el("div", "index-info");
-      foot.append(icon("database"), el("span", undefined, indexSummary(status)));
+      const line = el("div", "index-line");
+      line.append(icon("circle-filled", `index-dot tone-${st.tone}`), el("span", "index-state", st.label), el("span", "index-count", indexSummary(status)), el("span", "spacer"));
       const settings = el("button", "link", "Settings");
       settings.type = "button";
       settings.addEventListener("click", () => host.postMessage({ type: "command", command: "openSettings" }));
-      foot.append(settings);
+      line.append(settings);
+      foot.append(line, el("div", "index-model", modelLabel(status)));
       empty.append(foot);
     }
+    empty.append(keyHints());
+  }
+
+  function flat(): boolean {
+    return list.classList.contains("flat");
   }
 
   function navNodes(): HTMLElement[] {
-    return [...list.querySelectorAll<HTMLElement>(".file, .group:not(.collapsed) .result")];
+    return [...list.querySelectorAll<HTMLElement>(flat() ? ".result" : ".file, .group:not(.collapsed) .result")];
   }
 
   // Steps to the next or previous result, skipping file rows; returns undefined past either end.
@@ -325,6 +456,16 @@ export function createApp(root: HTMLElement, host: HostApi): App {
   function setCollapsed(group: HTMLElement, on: boolean): void {
     group.classList.toggle("collapsed", on);
     group.querySelector(".file")!.setAttribute("aria-expanded", String(!on));
+    updateCollapseAll();
+  }
+
+  function updateCollapseAll(): void {
+    const expand = list.querySelector(".group:not(.collapsed)") === null && list.querySelector(".group") !== null;
+    const label = expand ? "Expand all" : "Collapse all";
+    collapseAll.title = label;
+    collapseAll.setAttribute("aria-label", label);
+    collapseAll.firstElementChild!.className = `codicon codicon-${expand ? "expand-all" : "collapse-all"}`;
+    collapseAll.hidden = flat();
   }
 
   function select(i: number, focus = true): void {
@@ -339,6 +480,7 @@ export function createApp(root: HTMLElement, host: HostApi): App {
   }
 
   function open(r: SearchResult, side = false): void {
+    if (similar === undefined) remember(input.value.trim());
     host.postMessage({ type: "open", path: r.path, range: r.range, ...(side ? { side } : {}) });
   }
 
@@ -348,8 +490,49 @@ export function createApp(root: HTMLElement, host: HostApi): App {
     selected = -1;
     lastResponse = undefined;
     renderedKey = "";
-    summary.hidden = true;
+    summaryBar.hidden = true;
     more.hidden = true;
+  }
+
+  function closeSimilar(): void {
+    similar = undefined;
+    similarCard.hidden = true;
+  }
+
+  function requestSimilar(path: string, range: { startLine: number; endLine: number }, symbol: string | null, hideSameFile = true): void {
+    setBusy(true);
+    host.postMessage({ type: "similar", path, range, symbol, hideSameFile });
+  }
+
+  function renderSimilar(src: SimilarSource): void {
+    similarCard.textContent = "";
+    const head = el("div", "similar-head");
+    const { name } = splitPath(src.path);
+    const where = el("span", "similar-where", `${src.path} · ${src.range.startLine}–${src.range.endLine}`);
+    where.title = src.path;
+    const close = iconButton("close", "Back to search", "similar-close");
+    close.addEventListener("click", () => {
+      closeSimilar();
+      resetResults();
+      showMessage(undefined);
+      if (input.value.trim()) debounce.flush();
+      else updateEmpty();
+      input.focus();
+    });
+    head.append(icon("references"), el("span", "muted", "Similar to"), el("span", "similar-symbol", src.symbol ?? name), where, close);
+    similarCard.append(head);
+    if (src.lines.length > 0) {
+      const lines = src.lines.map((text, i) => ({ no: src.range.startLine + i, text, spans: [] }));
+      similarCard.append(codeBlock(lines, src.lang, src.range.endLine - src.range.startLine + 1 - src.lines.length));
+    }
+    const hide = el("label", "check-row similar-hide");
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = src.hideSameFile;
+    box.addEventListener("change", () => requestSimilar(src.path, src.range, src.symbol, box.checked));
+    hide.append(box, el("span", undefined, `Hide matches from ${name}`));
+    similarCard.append(hide);
+    similarCard.hidden = false;
   }
 
   function resultActions(r: SearchResult): HTMLElement {
@@ -365,7 +548,7 @@ export function createApp(root: HTMLElement, host: HostApi): App {
     };
     action("split-horizontal", "Open to the side (Ctrl+Enter)", () => open(r, true));
     action("copy", "Copy path and line", () => host.postMessage({ type: "copy", text: `${r.path}:${r.range.startLine}` }));
-    action("references", "Find similar code", () => host.postMessage({ type: "similar", path: r.path, range: { startLine: r.range.startLine, endLine: r.range.endLine } }));
+    action("references", "Find similar code", () => requestSimilar(r.path, { startLine: r.range.startLine, endLine: r.range.endLine }, r.symbol));
     return bar;
   }
 
@@ -377,6 +560,7 @@ export function createApp(root: HTMLElement, host: HostApi): App {
     list.textContent = "";
     items = [];
     selected = -1;
+    const top = resp.results.reduce((m, r) => Math.max(m, r.score), 0);
     const groups = groupByFile(resp.results);
     for (const g of groups) {
       const group = el("div", "group");
@@ -397,7 +581,17 @@ export function createApp(root: HTMLElement, host: HostApi): App {
         const head = el("div", "result-head");
         const kind = icon(kindIcon(r.kind), "kind");
         kind.title = r.kind;
-        head.append(kind, el("span", "symbol", r.symbol ?? r.kind), resultActions(r), sourceBadge(r), el("span", "lines", `${r.range.startLine}–${r.range.endLine}`));
+        const fileLabel = el("span", "result-file", name);
+        fileLabel.title = g.path;
+        head.append(kind, el("span", "symbol", r.symbol ?? r.kind), fileLabel, resultActions(r));
+        if (similar) {
+          const pct = el("span", `similarity${r.score < WEAK_SIMILARITY ? " weak" : ""}`, `${Math.round(r.score * 100)}%`);
+          pct.title = "Similarity relative to the closest match";
+          head.append(pct);
+        } else {
+          head.append(sourceTag(r), scoreBar(r.score, top));
+        }
+        head.append(el("span", "lines", `${r.range.startLine}–${r.range.endLine}`));
         node.append(head, renderSnippet(r));
         const idx = items.length;
         node.dataset.idx = String(idx);
@@ -412,11 +606,13 @@ export function createApp(root: HTMLElement, host: HostApi): App {
       list.append(group);
     }
     if (prev >= 0 && items[prev]) select(prev, false);
-    summary.hidden = resp.results.length === 0;
-    summary.textContent = summaryText(resp, groups.length);
+    updateCollapseAll();
+    summaryBar.hidden = resp.results.length === 0;
+    summary.textContent = summaryText(resp, groups.length, similar ? "similar chunk" : "result");
     more.hidden = key === "" || resp.total === undefined || resp.total <= resp.results.length;
     if (resp.results.length > 0) showMessage(undefined);
-    else if (filtersActive()) showMessage("No results", "Filters are active. Clear them to search the whole workspace.");
+    else if (similar) showMessage("No similar code found");
+    else if (filtersActive()) showMessage("No results", "Filters are active. Remove them to search the whole workspace.");
     else if (mode === "lexical") showMessage("No results", "Try Hybrid or Semantic mode to search by meaning.");
     else showMessage("No results");
   }
@@ -425,7 +621,7 @@ export function createApp(root: HTMLElement, host: HostApi): App {
     const query = input.value.trim();
     cancelPending();
     requestId++;
-    titleBar.hidden = true;
+    closeSimilar();
     if (!query) {
       resetResults();
       showMessage(undefined);
@@ -465,26 +661,33 @@ export function createApp(root: HTMLElement, host: HostApi): App {
     limit += pageSize;
     debounce.flush();
   });
-  filterSummaryText.addEventListener("click", () => filterToggle.click());
-  clearFilters.addEventListener("click", () => {
-    for (const f of [include, exclude, lang]) f.value = "";
-    updateFilterToggle();
-    debounce.flush();
-    input.focus();
-  });
   filterToggle.addEventListener("click", () => {
     filters.hidden = !filters.hidden;
     filterToggle.setAttribute("aria-expanded", String(!filters.hidden));
     updateFilterToggle();
     if (!filters.hidden) include.focus();
   });
-  closeTitle.addEventListener("click", () => {
-    titleBar.hidden = true;
-    resetResults();
-    showMessage(undefined);
-    if (input.value.trim()) debounce.flush();
-    else updateEmpty();
-    input.focus();
+  bannerPause.addEventListener("click", () => host.postMessage({ type: "command", command: status?.phase === "paused" ? "resume" : "pause" }));
+  codeToggle.addEventListener("click", () => {
+    const hide = list.classList.toggle("no-code");
+    const label = hide ? "Show code" : "Hide code";
+    codeToggle.title = label;
+    codeToggle.setAttribute("aria-label", label);
+    codeToggle.setAttribute("aria-pressed", String(hide));
+  });
+  viewToggle.addEventListener("click", () => {
+    const on = list.classList.toggle("flat");
+    const label = on ? "View as tree" : "View as list";
+    viewToggle.title = label;
+    viewToggle.setAttribute("aria-label", label);
+    viewToggle.setAttribute("aria-pressed", String(on));
+    viewToggle.firstElementChild!.className = `codicon codicon-${on ? "list-tree" : "list-flat"}`;
+    updateCollapseAll();
+  });
+  collapseAll.addEventListener("click", () => {
+    const collapse = list.querySelector(".group:not(.collapsed)") !== null;
+    for (const g of list.querySelectorAll<HTMLElement>(".group")) setCollapsed(g, collapse);
+    if (collapse && selected >= 0) select(-1, false);
   });
 
   function focusResult(node: HTMLElement | undefined): void {
@@ -514,7 +717,7 @@ export function createApp(root: HTMLElement, host: HostApi): App {
         select(-1);
         input.focus();
       }
-    } else if (e.key === "ArrowLeft" && (isResult || isFile)) {
+    } else if (e.key === "ArrowLeft" && (isResult || isFile) && !flat()) {
       e.preventDefault();
       const group = target.closest<HTMLElement>(".group")!;
       if (isFile) setCollapsed(group, true);
@@ -529,6 +732,7 @@ export function createApp(root: HTMLElement, host: HostApi): App {
       else focusResult(group.querySelector<HTMLElement>(".result") ?? undefined);
     } else if (e.key === "Enter" || (e.key === " " && isFile)) {
       if (target === input) {
+        remember(input.value.trim());
         debounce.flush();
       } else if (isFile) {
         e.preventDefault();
@@ -581,7 +785,7 @@ export function createApp(root: HTMLElement, host: HostApi): App {
           cancelPending();
           requestId++;
           input.value = "";
-          titleBar.hidden = true;
+          closeSimilar();
           resetResults();
           showMessage(undefined);
           updateBanner();
@@ -589,21 +793,21 @@ export function createApp(root: HTMLElement, host: HostApi): App {
           input.focus();
           break;
         case "results":
-          if (msg.title === undefined && msg.requestId !== requestId) return;
-          if (msg.title !== undefined) {
+          if (msg.similar === undefined && msg.requestId !== requestId) return;
+          if (msg.similar !== undefined) {
             debounce.cancel();
             cancelPending();
             requestId++;
-            heading.textContent = msg.title;
-            titleBar.hidden = false;
+            similar = msg.similar;
+            renderSimilar(msg.similar);
           } else {
             pendingId = undefined;
             setBusy(false);
-            titleBar.hidden = true;
+            closeSimilar();
           }
           empty.hidden = true;
           lastResponse = msg.response;
-          render(msg.response, msg.title === undefined ? queryKey : "");
+          render(msg.response, msg.similar === undefined ? queryKey : "");
           updateBanner();
           break;
         case "error":

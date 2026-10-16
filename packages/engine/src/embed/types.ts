@@ -17,6 +17,8 @@ export interface Embedder {
   embedQueries(texts: string[], signal?: AbortSignal): Promise<Float32Array[]>;
   embedDocuments(texts: string[], signal?: AbortSignal): Promise<Float32Array[]>;
   countTokens(text: string): number;
+  // Frees the model's memory; the next request loads it again.
+  unload?(): Promise<void>;
   dispose(): Promise<void>;
 }
 

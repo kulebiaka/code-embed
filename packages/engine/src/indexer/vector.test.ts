@@ -11,6 +11,7 @@ import type { ChunkInput, IndexStore } from "../store/types";
 import { DEFAULT_CHUNK_OPTIONS } from "../chunk/types";
 import type { EffectiveSettings } from "../config/types";
 import * as power from "./power";
+import { createVectorSlot } from "./slot";
 import type { IndexerContext } from "./types";
 import { createVectorPhase as createPhase } from "./vector";
 import type { VectorPhaseDeps } from "./vector";
@@ -208,6 +209,67 @@ describe("vector phase", () => {
     expect(store.counts().embedded).toBe(2);
     expect(phase.state).toBe("idle");
     await phase.stop();
+  });
+
+  it("waits in the queue while another process holds the slot", async () => {
+    addFile("a.ts", ["one", "two"]);
+    const other = createVectorSlot(join(dir, "slot"));
+    other.tryAcquire(true);
+    const emb = new FakeEmbedder({ dims: 8 });
+    const spy = vi.spyOn(emb, "embedDocuments");
+    const phase = createVectorPhase({ ctx, embCache: cache, embedder: emb, slot: createVectorSlot(join(dir, "slot")) });
+    phase.start();
+    await vi.waitFor(() => expect(phase.state).toBe("queued"));
+    expect(progress.at(-1)?.phase).toBe("queued");
+    expect(spy).not.toHaveBeenCalled();
+    other.release();
+    await phase.whenIdle();
+    expect(store.counts().embedded).toBe(2);
+    expect(other.tryAcquire(true)).toBe(true);
+  });
+
+  it("does not load the model or take the slot when nothing is pending", async () => {
+    const emb = new FakeEmbedder({ dims: 8 });
+    const init = vi.spyOn(emb, "init");
+    const slot = createVectorSlot(join(dir, "slot"));
+    const acquire = vi.spyOn(slot, "tryAcquire");
+    const phase = createVectorPhase({ ctx, embCache: cache, embedder: emb, slot });
+    phase.start();
+    await phase.whenIdle();
+    expect(init).not.toHaveBeenCalled();
+    expect(acquire).not.toHaveBeenCalled();
+  });
+
+  it("a background phase yields the slot to an active process and unloads the model", async () => {
+    addFile("a.ts", ["one", "two", "three", "four"]);
+    const emb = new FakeEmbedder({ dims: 8 });
+    const unload = vi.fn(async () => {});
+    const waiter = createVectorSlot(join(dir, "slot"));
+    let waiting = false;
+    const embed = emb.embedDocuments.bind(emb);
+    vi.spyOn(emb, "embedDocuments").mockImplementation(async (texts) => {
+      if (!waiting) {
+        waiting = true;
+        waiter.tryAcquire(true);
+      }
+      return embed(texts);
+    });
+    const phase = createVectorPhase({
+      ctx,
+      embCache: cache,
+      embedder: Object.assign(emb, { unload }),
+      batchSize: 1,
+      slot: createVectorSlot(join(dir, "slot")),
+      isActive: () => false,
+    });
+    phase.start();
+    await vi.waitFor(() => expect(phase.state).toBe("queued"));
+    expect(unload).toHaveBeenCalledOnce();
+    expect(store.counts().embedded).toBe(1);
+    expect(waiter.tryAcquire(true)).toBe(true);
+    waiter.release();
+    await phase.whenIdle();
+    expect(store.counts().embedded).toBe(4);
   });
 
   it("waits on battery when pauseOnBattery is set", async () => {

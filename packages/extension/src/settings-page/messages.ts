@@ -9,10 +9,13 @@ export const SETTING_KEYS = [
   "index.maxFileKb",
   "index.threads",
   "index.pauseOnBattery",
+  "index.exclude",
   "search.defaultMode",
   "search.top",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
+// Machine-wide settings ("scope": "application") exist only in user settings.
+export const APPLICATION_KEYS: readonly SettingKey[] = ["index.threads"];
 
 export type Scope = "user" | "workspace";
 
@@ -43,13 +46,24 @@ export interface SettingsState {
   models: ModelListItem[] | null;
 }
 
-export type SettingsAction = "reindex" | "rebuild" | "pause" | "resume" | "showLog" | "installCli" | "copyMcpConfig" | "openJson";
+export type SettingsAction =
+  | "reindex"
+  | "rebuild"
+  | "pause"
+  | "resume"
+  | "showLog"
+  | "installCli"
+  | "copyMcpConfig"
+  | "openJson"
+  | "copyIndexPath"
+  | "revealIndex"
+  | "grantConsent";
 
 export type SettingsToHost =
   | { type: "ready" }
   | { type: "setScope"; scope: Scope }
   | { type: "update"; key: SettingKey; value: unknown }
-  | { type: "saveProvider"; previousName?: string; name: string; config: ProviderConfig; apiKey?: string }
+  | { type: "saveProvider"; previousName?: string; name: string; config: ProviderConfig; apiKey?: string; use?: boolean }
   | { type: "deleteProvider"; name: string }
   | { type: "useProvider"; name: string }
   | { type: "testProvider"; name: string }

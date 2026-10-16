@@ -65,6 +65,7 @@ export function engineSummary(engine: ClientState | undefined, s: IndexStatus | 
   if (s.phase === "model-download") return { label: "Downloading model…", tone: "busy" };
   if (s.phase === "scanning") return { label: "Scanning files…", tone: "busy" };
   const percent = s.chunks > 0 ? Math.min(100, Math.floor((s.embedded / s.chunks) * 100)) : 0;
+  if (s.phase === "queued") return { label: `Waiting for another project, ${percent}% embedded`, tone: "busy", percent };
   if (s.lexicalOnly) return { label: "Ready, keyword search only", tone: "warn" };
   if (s.phase !== "idle" || (s.chunks > 0 && s.embedded < s.chunks)) return { label: `Indexing, ${percent}% embedded`, tone: "busy", percent };
   return { label: "Index up to date", tone: "ok", percent: 100 };
@@ -73,4 +74,29 @@ export function engineSummary(engine: ClientState | undefined, s: IndexStatus | 
 export function parseIntSetting(raw: string, min: number): number | undefined {
   const n = Number(raw.trim());
   return raw.trim() !== "" && Number.isInteger(n) && n >= min ? n : undefined;
+}
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+// The host a provider URL sends code to, or undefined when it stays on this machine or is not a URL yet.
+export function remoteHost(url: string): string | undefined {
+  try {
+    const host = new URL(url.trim()).hostname;
+    return host && !LOCAL_HOSTS.has(host) ? host : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function indexCounts(s: IndexStatus): string {
+  const n = (v: number) => v.toLocaleString("en-US");
+  const base = `${n(s.files)} file${s.files === 1 ? "" : "s"} · ${n(s.chunks)} chunk${s.chunks === 1 ? "" : "s"}`;
+  if (s.lexicalOnly || s.chunks === 0) return base;
+  return s.embedded >= s.chunks ? `${base}, all embedded` : `${base}, ${n(s.embedded)} embedded`;
+}
+
+export function matchesFilter(text: string, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const hay = text.toLowerCase();
+  return words.every((w) => hay.includes(w));
 }

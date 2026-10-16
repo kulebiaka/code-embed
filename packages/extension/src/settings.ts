@@ -17,6 +17,7 @@ export function readEngineSettings(): EngineSettings {
   const nonEmpty = (v: string | undefined): string | undefined => (v ? v : undefined);
 
   const exclude = [
+    ...(get<string[]>("index.exclude") ?? []),
     ...excludeGlobs(vscode.workspace.getConfiguration("files").get<Record<string, boolean>>("exclude")),
     ...excludeGlobs(vscode.workspace.getConfiguration("search").get<Record<string, boolean>>("exclude")),
   ];

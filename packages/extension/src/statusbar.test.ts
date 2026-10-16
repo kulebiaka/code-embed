@@ -24,6 +24,11 @@ describe("statusBarView", () => {
   it("indexing percent", () => {
     expect(statusBarView("ready", base).text).toBe("$(search) indexing 42% · local");
   });
+  it("queued", () => {
+    const v = statusBarView("ready", { ...base, phase: "queued" });
+    expect(v.text).toBe("$(search) queued · local");
+    expect(v.tooltip).toContain("Waiting for another project");
+  });
   it("lexical only", () => {
     expect(statusBarView("ready", { ...base, phase: "idle", lexicalOnly: true }).text).toContain("lexical only");
   });

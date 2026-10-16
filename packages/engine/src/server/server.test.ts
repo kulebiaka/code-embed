@@ -44,6 +44,7 @@ function fakeEngine(over: Record<string, unknown> = {}) {
     })),
     search: vi.fn(async (p: { query: string }) => ({ results: [], partial: false, tookMs: 1, total: p.query.length })),
     status: vi.fn(async () => status),
+    setActive: vi.fn(),
     onProgress: vi.fn(() => ({ dispose() {} })),
     onIndexError: vi.fn(() => ({ dispose() {} })),
     onLog: vi.fn(() => ({ dispose() {} })),
@@ -112,6 +113,25 @@ describeUnix("daemon over a unix socket", () => {
     a!.close();
     b!.close();
     expect(await connectDaemon(root, "c")).toBeNull();
+  });
+
+  it("goes to the background only when every client is in the background", async () => {
+    const engine = fakeEngine();
+    const { done } = await startDaemon(engine);
+    const last = () => vi.mocked(engine.setActive).mock.calls.at(-1)?.[0];
+    const [a, b] = await Promise.all([connectDaemon(root, "a"), connectDaemon(root, "b")]);
+    await a!.initialize({ ...init("a"), active: false });
+    await b!.initialize(init("b"));
+    expect(last()).toEqual({ active: true });
+    b!.setActive({ active: false });
+    await vi.waitFor(() => expect(last()).toEqual({ active: false }));
+    a!.setActive({ active: true });
+    await vi.waitFor(() => expect(last()).toEqual({ active: true }));
+    a!.close();
+    await vi.waitFor(() => expect(last()).toEqual({ active: false }));
+    expect(await stopDaemon(root)).toBe(true);
+    await done;
+    b!.close();
   });
 
   it("accepts a symlinked root and rejects a foreign one", async () => {

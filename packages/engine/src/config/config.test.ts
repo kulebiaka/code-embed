@@ -146,7 +146,7 @@ describe("resolveSettings", () => {
       searchMode: "hybrid",
       provider: "local",
       model: "qwen3-embedding-0.6b",
-      threads: Math.max(1, Math.floor(availableParallelism() / 2)),
+      threads: Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2))),
       pauseOnBattery: false,
       exclude: [],
       allowRemote: false,
@@ -169,6 +169,11 @@ describe("resolveSettings", () => {
       "editor beats user",
       { project: {}, editor: { search: { top: 3 }, index: { threads: 7 } }, user: { search: { top: 4 }, index: { threads: 2 } } },
       { searchTop: 3, threads: 7 },
+    ],
+    [
+      "zero threads means automatic",
+      { project: {}, editor: { index: { threads: 0 } }, user: { index: { threads: 3 } } },
+      { threads: 3 },
     ],
     ["user beats defaults", { project: {}, user: { index: { max_file_kb: 9, pause_on_battery: true } } }, { maxFileKb: 9, pauseOnBattery: true }],
     [

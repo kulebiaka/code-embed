@@ -75,6 +75,7 @@ export function serveStdio(opts: { createEngine: (init: InitializeParams) => Pro
     },
     filesChanged: (p) => engine?.filesChanged(p),
     filesOpened: (p) => engine?.filesOpened(p),
+    setActive: (p) => engine?.setActive(p),
     onProgress: progress.on,
     onIndexError: indexError.on,
     onLog: logs.on,

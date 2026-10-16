@@ -72,7 +72,8 @@ export type FindSimilarParams =
   | ({ path: string; range: LineRange; top?: number; threshold?: number } & SearchFilters)
   | ({ code: string; lang?: string; top?: number; threshold?: number } & SearchFilters);
 
-export type IndexPhase = "idle" | "scanning" | "lexical" | "vector" | "model-download" | "paused" | "error";
+// queued: the vector phase waits for another project on this machine to finish with the local model.
+export type IndexPhase = "idle" | "scanning" | "lexical" | "vector" | "queued" | "model-download" | "paused" | "error";
 
 export interface IndexStatus {
   root: string;
@@ -129,6 +130,8 @@ export interface InitializeParams {
   protocolVersion: number;
   settings?: EngineSettings;
   apiKeys?: Record<string, string>;
+  // false: the client is in the background (see ActivityParams); default true.
+  active?: boolean;
 }
 export interface InitializeResult {
   serverVersion: string;
@@ -176,6 +179,10 @@ export interface FilesChangedParams {
 export interface FilesOpenedParams {
   paths: string[];
 }
+// A background client keeps embedding pending chunks but defers change detection until it is active again.
+export interface ActivityParams {
+  active: boolean;
+}
 export interface IndexProgress {
   phase: IndexPhase;
   done: number;
@@ -211,6 +218,7 @@ export type MethodName = (typeof Methods)[keyof typeof Methods];
 export const Notifications = {
   filesChanged: "files.changed",
   filesOpened: "files.opened",
+  clientActivity: "client.activity",
   indexProgress: "index.progress",
   indexError: "index.error",
   log: "log",
@@ -237,6 +245,7 @@ export interface EngineApi {
   shutdown(): Promise<void>;
   filesChanged(p: FilesChangedParams): void;
   filesOpened(p: FilesOpenedParams): void;
+  setActive(p: ActivityParams): void;
   onProgress(cb: (p: IndexProgress) => void): Disposable;
   onIndexError(cb: (p: IndexErrorParams) => void): Disposable;
   onLog(cb: (p: LogParams) => void): Disposable;

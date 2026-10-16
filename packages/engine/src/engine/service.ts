@@ -2,6 +2,7 @@ import {
   EngineRpcError,
   ErrorCodes,
   PROTOCOL_VERSION,
+  type ActivityParams,
   type ConsentGrantParams,
   type Disposable,
   type EngineSettings,
@@ -42,9 +43,10 @@ import type { Embedder } from "../embed/types";
 import { ConsentRequiredError, ProtocolMismatchError } from "../errors";
 import { applyChanges, runLexical } from "../indexer/lexical";
 import { type OpenedIndex, openIndex } from "../indexer/open";
+import { createVectorSlot } from "../indexer/slot";
 import type { IndexerContext, PathChanges } from "../indexer/types";
 import { type VectorPhase, createVectorPhase } from "../indexer/vector";
-import { type Watcher, startWatcher } from "../indexer/watcher";
+import { MASS_THRESHOLD, type Watcher, startWatcher } from "../indexer/watcher";
 import { search } from "../search/hybrid";
 import { findSimilar } from "../search/similar";
 import { INDEXING_EMBED_TIMEOUT_MS, type SearchContext } from "../search/types";
@@ -162,9 +164,24 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
   let vectorStarted = false;
   let watcher: Watcher | null = null;
   let startup: Promise<void> = Promise.resolve();
+  // In the background, changes are collected here and the scan is skipped; catchUp() applies them.
+  let active = opts.active ?? true;
+  let deferred: Map<string, keyof PathChanges> | null = null;
+  let scanDeferred = false;
+  let catching: Promise<void> | null = null;
+  const slot = createVectorSlot();
 
   const setupVector = () => {
-    vector = embedder && !readOnly ? createVectorPhase({ ctx, embCache, embedder }) : null;
+    vector =
+      embedder && !readOnly
+        ? createVectorPhase({
+            ctx,
+            embCache,
+            embedder,
+            slot: embedder.info.provider === "local" ? slot : undefined,
+            isActive: () => active,
+          })
+        : null;
     return vector;
   };
 
@@ -207,6 +224,13 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
     await lexicalPass(false);
   };
 
+  const defer = (changes: PathChanges) => {
+    deferred ??= new Map();
+    for (const p of changes.deleted) deferred.set(p, "deleted");
+    for (const p of changes.created) deferred.set(p, deferred.get(p) === "deleted" ? "changed" : "created");
+    for (const p of changes.changed) if (deferred.get(p) !== "created") deferred.set(p, "changed");
+  };
+
   const applyBatch = async (changes: PathChanges, mass: boolean) => {
     if (closed) return;
     try {
@@ -239,14 +263,46 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
       vector && (vector.state === "running" || vector.state === "waiting-provider") ? INDEXING_EMBED_TIMEOUT_MS : undefined,
   });
 
+  const onChanges = async (changes: PathChanges, mass: boolean) => {
+    if (active) await applyBatch(changes, mass);
+    else defer(changes);
+  };
+
+  const catchUp = (): Promise<void> => {
+    if (catching) return catching;
+    if (!scanDeferred && !deferred) return Promise.resolve();
+    const run = async () => {
+      try {
+        if (scanDeferred) {
+          scanDeferred = false;
+          deferred = null;
+          await lexicalPass(false);
+          vector?.notifyChanged([]);
+          return;
+        }
+        const changes: PathChanges = { created: [], changed: [], deleted: [] };
+        for (const [p, kind] of deferred!) changes[kind].push(p);
+        deferred = null;
+        await applyBatch(changes, changes.created.length + changes.changed.length + changes.deleted.length > MASS_THRESHOLD);
+      } catch (e) {
+        ctx.onError({ message: `update failed: ${msg(e)}` });
+      }
+    };
+    catching = run().finally(() => {
+      catching = null;
+    });
+    return catching;
+  };
+
   setupVector();
   if (!readOnly && opts.watch) {
-    watcher = await startWatcher({ root, indexDir, exclude: settings.exclude, onBatch: applyBatch });
+    watcher = await startWatcher({ root, indexDir, exclude: settings.exclude, onBatch: onChanges });
   }
   if (!readOnly && opts.vectorPhase) {
     startup = (async () => {
       try {
-        await lexicalPass(false);
+        if (active) await lexicalPass(false);
+        else scanDeferred = true;
         await startVector();
       } catch (e) {
         ctx.onError({ message: `indexing failed: ${msg(e)}` });
@@ -278,17 +334,24 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
     return st;
   };
 
-  const reconfigureEmbedder = async () => {
-    const wasStarted = vectorStarted;
-    await vector?.stop();
-    vector = null;
-    vectorStarted = false;
-    await embedder?.dispose();
-    await setupEmbedder();
-    adoptEmbedder();
-    if (userPaused) setupVector()?.pause();
-    else setupVector();
-    if (wasStarted || opts.vectorPhase) await startVector();
+  let reconfiguring: Promise<void> = Promise.resolve();
+  // overlapping runs would each create an embedder and vector phase and orphan all but the last
+  const reconfigureEmbedder = (): Promise<void> => {
+    const r = reconfiguring.then(async () => {
+      if (closed) return;
+      const wasStarted = vectorStarted;
+      await vector?.stop();
+      vector = null;
+      vectorStarted = false;
+      await embedder?.dispose();
+      await setupEmbedder();
+      adoptEmbedder();
+      if (userPaused) setupVector()?.pause();
+      else setupVector();
+      if (wasStarted || opts.vectorPhase) await startVector();
+    });
+    reconfiguring = r.catch(() => {});
+    return r;
   };
 
   const requireEmbedder = (): Embedder => {
@@ -322,8 +385,10 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
     closed = true;
     throttled.dispose();
     await watcher?.close();
+    await reconfiguring;
     await vector?.stop();
     await startup;
+    await catching;
     await chain;
     await embedder?.dispose();
     setLogSink(null);
@@ -348,6 +413,7 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
       };
     },
     async search(p: SearchParams, signal?: AbortSignal): Promise<SearchResponse> {
+      await catchUp();
       await ensureLexical();
       return search(
         searchContext(),
@@ -356,6 +422,7 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
       );
     },
     async findSimilar(p: FindSimilarParams, signal?: AbortSignal): Promise<SearchResponse> {
+      await catchUp();
       await ensureLexical();
       return findSimilar({ ...searchContext(), root }, p, signal);
     },
@@ -433,10 +500,15 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
     filesChanged(p: FilesChangedParams) {
       if (readOnly || closed) return;
       if (watcher) watcher.notify(p);
-      else void applyBatch(p, false);
+      else void onChanges(p, false);
     },
     filesOpened(p: FilesOpenedParams) {
       vector?.prioritize(p.paths);
+    },
+    setActive(p: ActivityParams) {
+      if (readOnly || closed || active === p.active) return;
+      active = p.active;
+      if (active) void catchUp();
     },
     onProgress(cb): Disposable {
       progressListeners.add(cb);

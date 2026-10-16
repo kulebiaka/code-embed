@@ -4,7 +4,7 @@ import type { ModelListItem, ProviderConfig, ProviderListItem } from "@code-embe
 import type { EngineClient, EngineSupervisor } from "../engine/types";
 import { buildHtml } from "../panel";
 import { SECTION } from "../settings";
-import { SETTING_KEYS, type HostToSettings, type ProviderRow, type Scope, type SettingsAction, type SettingsState, type SettingsToHost } from "./messages";
+import { APPLICATION_KEYS, SETTING_KEYS, type HostToSettings, type ProviderRow, type Scope, type SettingsAction, type SettingsState, type SettingsToHost } from "./messages";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 const KEY_PREFIX = "codeEmbed.apiKey.";
@@ -121,7 +121,11 @@ export class SettingsPage {
           await this.sendState();
           return;
         }
-        await this.config().update(msg.key, msg.value ?? undefined, this.target());
+        await this.config().update(
+          msg.key,
+          msg.value ?? undefined,
+          APPLICATION_KEYS.includes(msg.key) ? vscode.ConfigurationTarget.Global : this.target(),
+        );
         return;
       case "useProvider":
         if (!(await this.confirmSwitch(msg.name === "local" ? "the built-in model" : msg.name))) return;
@@ -129,7 +133,7 @@ export class SettingsPage {
         await this.supervisor.restart();
         return;
       case "saveProvider":
-        await this.saveProvider(msg.name, msg.config, msg.previousName, msg.apiKey);
+        await this.saveProvider(msg.name, msg.config, msg.previousName, msg.apiKey, msg.use);
         return;
       case "deleteProvider":
         await this.deleteProvider(msg.name);
@@ -174,6 +178,23 @@ export class SettingsPage {
       case "resume":
         await this.client.resume();
         return;
+      case "copyIndexPath": {
+        const dir = this.client.lastStatus?.indexDir;
+        if (!dir) return;
+        await vscode.env.clipboard.writeText(dir);
+        vscode.window.setStatusBarMessage(`Copied ${dir}`, 2000);
+        return;
+      }
+      case "revealIndex": {
+        const dir = this.client.lastStatus?.indexDir;
+        if (dir) await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(dir));
+        return;
+      }
+      case "grantConsent": {
+        const consent = this.client.lastStatus?.consentRequired;
+        if (consent) await this.client.grantConsent({ host: consent.host });
+        return;
+      }
       case "openJson":
         await vscode.commands.executeCommand(
           this.scope === "workspace" ? "workbench.action.openWorkspaceSettingsFile" : "workbench.action.openSettingsJson",
@@ -197,7 +218,7 @@ export class SettingsPage {
     return choice === ok;
   }
 
-  private async saveProvider(name: string, config: ProviderConfig, previousName?: string, apiKey?: string): Promise<void> {
+  private async saveProvider(name: string, config: ProviderConfig, previousName?: string, apiKey?: string, use = false): Promise<void> {
     const renamed = previousName !== undefined && previousName !== name;
     let keyChanged = Boolean(apiKey);
     if (renamed) {
@@ -216,7 +237,9 @@ export class SettingsPage {
     current[name] = config;
     await this.config().update("providers", current, this.target());
     if (apiKey) await this.ctx.secrets.store(KEY_PREFIX + name, apiKey);
-    if (keyChanged) await this.supervisor.restart();
+    const switching = use && this.config().get<string>("embedding.provider") !== name && (await this.confirmSwitch(name));
+    if (switching) await this.config().update("embedding.provider", name, this.target());
+    if (keyChanged || switching) await this.supervisor.restart();
   }
 
   private async deleteProvider(name: string): Promise<void> {

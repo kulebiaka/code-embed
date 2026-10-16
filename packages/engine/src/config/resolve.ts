@@ -10,6 +10,11 @@ export interface SettingsSources {
   user: UserConfig;
 }
 
+// Total for the machine: only one process runs the vector phase of a local model at a time.
+export function defaultThreads(): number {
+  return Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2)));
+}
+
 function pick<T>(...vals: (T | undefined)[]): T | undefined {
   return vals.find((v) => v !== undefined);
 }
@@ -23,8 +28,8 @@ export function resolveSettings(src: SettingsSources): EffectiveSettings {
       pick(cli.maxFileKb, project.index?.max_file_kb, editor.index?.maxFileKb, user.index?.max_file_kb) ??
       DEFAULTS.maxFileKb,
     threads:
-      pick(cli.threads, editor.index?.threads, user.index?.threads) ??
-      Math.max(1, Math.floor(availableParallelism() / 2)),
+      pick(...[cli.threads, editor.index?.threads, user.index?.threads].map((n) => (n ? n : undefined))) ??
+      defaultThreads(),
     pauseOnBattery:
       pick(cli.pauseOnBattery, editor.index?.pauseOnBattery, user.index?.pause_on_battery) ?? false,
     exclude: pick(cli.exclude, project.exclude, editor.index?.exclude, user.exclude) ?? [],

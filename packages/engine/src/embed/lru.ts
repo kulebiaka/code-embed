@@ -36,6 +36,7 @@ export function withQueryCache(e: Embedder, capacity = 1000): Embedder {
     },
     embedDocuments: (texts, signal) => e.embedDocuments(texts, signal),
     countTokens: (text) => e.countTokens(text),
+    unload: e.unload && (() => e.unload!()),
     dispose: () => e.dispose(),
   };
 }

@@ -9,6 +9,7 @@ import { log } from "../util/log";
 import { recentlyChangedPaths } from "./git";
 import { isOnBattery } from "./power";
 import { orderPaths, toStorePath } from "./queue";
+import type { VectorSlot } from "./slot";
 import type { IndexerContext } from "./types";
 
 export interface VectorPhase {
@@ -18,7 +19,7 @@ export interface VectorPhase {
   resume(): void;
   prioritize(paths: string[]): void;
   notifyChanged(paths: string[]): void;
-  readonly state: "idle" | "running" | "paused" | "waiting-provider";
+  readonly state: "idle" | "running" | "queued" | "paused" | "waiting-provider";
   whenIdle(): Promise<void>;
 }
 
@@ -28,12 +29,16 @@ export interface VectorPhaseDeps {
   embedder: Embedder;
   batchSize?: number;
   commitEvery?: number;
+  // Shared with other processes; absent for providers that do not use local CPU.
+  slot?: VectorSlot;
+  isActive?: () => boolean;
 }
 
 const GROUP = 16;
 const BACKOFF_START_MS = 1000;
 const BACKOFF_MAX_MS = 30_000;
 const BATTERY_POLL_MS = 30_000;
+const SLOT_POLL_MS = 1000;
 
 type State = VectorPhase["state"];
 
@@ -46,7 +51,8 @@ function touch(list: string[], paths: string[]): void {
 }
 
 export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
-  const { ctx, embCache, embedder } = deps;
+  const { ctx, embCache, embedder, slot } = deps;
+  const isActive = deps.isActive ?? (() => true);
   const batchSize = deps.batchSize ?? 32;
   const commitEvery = deps.commitEvery ?? 8;
   const root = ctx.root;
@@ -75,7 +81,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
     state = s;
   };
 
-  const progress = (phase: "vector" | "paused" | "idle" | "error") => {
+  const progress = (phase: "vector" | "queued" | "paused" | "idle" | "error") => {
     const c = ctx.store.counts();
     ctx.onProgress({ phase, done: c.embedded, total: c.chunks, embedded: c.embedded });
   };
@@ -158,6 +164,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
     let backoff = BACKOFF_START_MS;
     let batteryAt = 0;
     let onBattery = false;
+    let announced = false;
     await Promise.resolve();
     try {
       gitRecent ??= await recentlyChangedPaths(root);
@@ -165,6 +172,8 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
         if (stopped) break;
         if (paused) {
           flush();
+          slot?.release();
+          announced = false;
           progress("paused");
           setState("paused");
           await nap(Infinity);
@@ -178,23 +187,43 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
           }
           if (onBattery) {
             flush();
+            slot?.release();
+            announced = false;
             progress("paused");
             setState("paused");
             await nap(BATTERY_POLL_MS);
             continue;
           }
         }
-        setState("running");
         try {
-          if (!dimsReady) await prepare();
+          // with unknown dims the stored vectors may belong to another model, so learn dims before picking work
+          if (!dimsReady && embedder.info.dims <= 0) await prepare();
           const rows = nextBatch();
           if (rows.length === 0) break;
+          if (slot && !slot.tryAcquire(isActive())) {
+            flush();
+            if (state !== "queued") progress("queued");
+            announced = false;
+            setState("queued");
+            await nap(SLOT_POLL_MS);
+            continue;
+          }
+          if (!announced) progress("vector");
+          announced = true;
+          setState("running");
+          if (!dimsReady) await prepare();
           await processBatch(rows);
           backoff = BACKOFF_START_MS;
+          if (slot?.shouldYield(isActive())) {
+            flush();
+            slot.release();
+            await embedder.unload?.();
+          }
         } catch (err) {
           if (stopped) break;
           if (err instanceof ProviderUnavailableError) {
             flush();
+            slot?.release();
             setState("waiting-provider");
             ctx.onError({ message: `embedding provider unavailable: ${err.message}` });
             const delay = err.retryAfterMs ?? backoff;
@@ -209,6 +238,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
         }
       }
     } finally {
+      slot?.release();
       try {
         flush();
       } catch (err) {

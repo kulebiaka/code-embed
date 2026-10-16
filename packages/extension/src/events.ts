@@ -2,8 +2,10 @@ import type { Disposable, EngineApi } from "@code-embed/protocol";
 import * as vscode from "vscode";
 
 const BATCH_MS = 300;
+// Short trips to another window keep this one active.
+export const BACKGROUND_AFTER_MS = 30_000;
 
-type Sink = Pick<EngineApi, "filesChanged" | "filesOpened">;
+type Sink = Pick<EngineApi, "filesChanged" | "filesOpened" | "setActive">;
 
 function filePath(uri: vscode.Uri): string | undefined {
   return uri.scheme === "file" ? uri.fsPath : undefined;
@@ -62,6 +64,14 @@ export function registerEditorEvents(client: Sink): Disposable {
     if (paths.size > 0) client.filesOpened({ paths: [...paths] });
   };
 
+  let blurTimer: ReturnType<typeof setTimeout> | undefined;
+  const onWindowState = (state: vscode.WindowState) => {
+    if (blurTimer) clearTimeout(blurTimer);
+    blurTimer = undefined;
+    if (state.focused) client.setActive({ active: true });
+    else blurTimer = setTimeout(() => client.setActive({ active: false }), BACKGROUND_AFTER_MS);
+  };
+
   const watcher = vscode.workspace.createFileSystemWatcher("**/*");
   const subs: Disposable[] = [
     watcher,
@@ -71,12 +81,15 @@ export function registerEditorEvents(client: Sink): Disposable {
     vscode.workspace.onDidSaveTextDocument((doc) => onChange(doc.uri)),
     vscode.window.onDidChangeVisibleTextEditors(sendOpened),
     vscode.window.onDidChangeActiveTextEditor(sendOpened),
+    vscode.window.onDidChangeWindowState(onWindowState),
   ];
   sendOpened();
+  client.setActive({ active: vscode.window.state.focused });
 
   return {
     dispose: () => {
       if (timer) clearTimeout(timer);
+      if (blurTimer) clearTimeout(blurTimer);
       subs.forEach((s) => s.dispose());
     },
   };

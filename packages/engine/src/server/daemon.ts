@@ -104,11 +104,21 @@ export async function runDaemon(opts: DaemonOptions): Promise<void> {
   let initialized = false;
   let stop: () => Promise<void> = async () => {};
 
-  const facadeFor = (): EngineApi => ({
+  // The daemon is in the background only when every connected client says so; clients that never report count as active.
+  const activity = new Map<Socket, boolean>();
+  const syncActivity = () =>
+    engine.setActive({ active: clients.size === 0 || [...clients].some((c) => activity.get(c) ?? true) });
+  const setActivity = (socket: Socket, active: boolean) => {
+    activity.set(socket, active);
+    syncActivity();
+  };
+
+  const facadeFor = (socket: Socket): EngineApi => ({
     initialize: async (p) => {
       if (canonicalRoot(p.root) !== canonicalRoot(root)) {
         throw new EngineRpcError(-32600, `daemon serves ${root}, not ${p.root}`);
       }
+      if (p.active !== undefined) setActivity(socket, p.active);
       if (!initialized) {
         initialized = true;
         return engine.initialize(p);
@@ -137,6 +147,7 @@ export async function runDaemon(opts: DaemonOptions): Promise<void> {
     },
     filesChanged: (p) => engine.filesChanged(p),
     filesOpened: (p) => engine.filesOpened(p),
+    setActive: (p) => setActivity(socket, p.active),
     onProgress: (cb) => engine.onProgress(cb),
     onIndexError: (cb) => engine.onIndexError(cb),
     onLog: (cb) => engine.onLog(cb),
@@ -146,9 +157,11 @@ export async function runDaemon(opts: DaemonOptions): Promise<void> {
     clients.add(socket);
     socket.on("error", () => {});
     const conn = createMessageConnection(new StreamMessageReader(socket), new StreamMessageWriter(socket));
-    const handlers = registerEngineHandlers(conn, facadeFor());
+    const handlers = registerEngineHandlers(conn, facadeFor(socket));
     const cleanup = () => {
       clients.delete(socket);
+      activity.delete(socket);
+      syncActivity();
       handlers.dispose();
       conn.dispose();
     };

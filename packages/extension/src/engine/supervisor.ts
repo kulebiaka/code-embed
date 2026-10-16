@@ -142,6 +142,7 @@ export function createEngineSupervisor(ctx: vscode.ExtensionContext, output: vsc
     shutdown: () => call((a) => a.shutdown()),
     filesChanged: (p) => notify((a) => a.filesChanged(p)),
     filesOpened: (p) => notify((a) => a.filesOpened(p)),
+    setActive: (p) => notify((a) => a.setActive(p)),
     onProgress: (cb) => progressEmitter.on(cb),
     onIndexError: (cb) => errorEmitter.on(cb),
     onLog: (cb) => logEmitter.on(cb),
@@ -291,6 +292,7 @@ export function createEngineSupervisor(ctx: vscode.ExtensionContext, output: vsc
         root,
         clientName: "vscode",
         protocolVersion: PROTOCOL_VERSION,
+        active: vscode.window.state.focused,
         settings,
         apiKeys: await collectApiKeys(settings),
       });

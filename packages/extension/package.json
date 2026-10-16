@@ -275,7 +275,8 @@
             "type": "integer",
             "default": 0,
             "minimum": 0,
-            "description": "Number of threads for the local embedding model (0 = automatic).",
+            "scope": "application",
+            "description": "Total threads for the local embedding model across all windows and projects on this machine (0 = automatic: half of the cores, at most 4).",
             "order": 3
           },
           "codeEmbed.index.pauseOnBattery": {
@@ -283,6 +284,15 @@
             "default": false,
             "description": "Pause the vector phase of indexing while running on battery.",
             "order": 4
+          },
+          "codeEmbed.index.exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Glob patterns of files to skip, in addition to .gitignore, files.exclude and search.exclude.",
+            "order": 5
           }
         }
       },

@@ -10,6 +10,7 @@ export const run: CommandRun = async () => {
         clientName: init.clientName,
         settings: init.settings,
         apiKeys: init.apiKeys,
+        active: init.active,
         watch: true,
         vectorPhase: true,
       }),

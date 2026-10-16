@@ -15,6 +15,7 @@ export interface WorkerSpawnOptions {
   args?: string[];
   execArgv?: string[];
   env?: NodeJS.ProcessEnv;
+  idleUnloadMs?: number;
 }
 
 const DOC_REQUEST_TEXTS = 8;
@@ -22,6 +23,7 @@ const DOC_REQUEST_CHARS = 4096;
 const MAX_CRASHES = 3;
 const BLOCK_MS = 600_000;
 const KILL_AFTER_MS = 2000;
+const IDLE_UNLOAD_MS = 5 * 60_000;
 
 const PRIO_QUERY = 0;
 const PRIO_INTERACTIVE = 1;
@@ -103,10 +105,13 @@ export function createWorkerEmbedder(entry: ModelEntry, opts: LocalEmbedderOptio
   let initP: Promise<void> | undefined;
   let inflight: Inflight | undefined;
   const queue: Job[] = [];
+  let disposed = false;
   let crashes = 0;
   let blockedUntil = 0;
   let seq = 0;
   let nextId = 0;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let unloadWhenIdle = false;
 
   const finish = (call: Call, err?: unknown) => {
     if (call.done) return;
@@ -231,6 +236,7 @@ export function createWorkerEmbedder(entry: ModelEntry, opts: LocalEmbedderOptio
   };
 
   const start = (): Promise<void> => {
+    if (disposed) return Promise.reject(new Error("embedder disposed"));
     if (initP) return initP;
     const p = boot();
     initP = p;
@@ -240,8 +246,29 @@ export function createWorkerEmbedder(entry: ModelEntry, opts: LocalEmbedderOptio
     return p;
   };
 
+  const unloadNow = (): Promise<void> => {
+    unloadWhenIdle = false;
+    const c = child;
+    if (!c) return Promise.resolve();
+    child = undefined;
+    ready = false;
+    initP = undefined;
+    return terminate(c);
+  };
+
   const pump = () => {
-    if (queue.length === 0) return;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = undefined;
+    if (queue.length === 0) {
+      if (child && ready && !inflight) {
+        if (unloadWhenIdle) void unloadNow();
+        else {
+          idleTimer = setTimeout(() => void unloadNow(), spawn.idleUnloadMs ?? IDLE_UNLOAD_MS);
+          idleTimer.unref();
+        }
+      }
+      return;
+    }
     if (!child) {
       start().catch((err) => failAll(err));
       return;
@@ -314,7 +341,18 @@ export function createWorkerEmbedder(entry: ModelEntry, opts: LocalEmbedderOptio
       );
     },
     countTokens: (text) => Math.ceil(text.length / 4),
+    async unload() {
+      if (inflight || queue.length > 0) unloadWhenIdle = true;
+      else {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = undefined;
+        await unloadNow();
+      }
+    },
     async dispose() {
+      disposed = true;
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = undefined;
       const c = child;
       child = undefined;
       ready = false;

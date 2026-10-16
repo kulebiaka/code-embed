@@ -10,6 +10,7 @@ import {
   Methods,
   Notifications,
   PROTOCOL_VERSION,
+  type ActivityParams,
   type Disposable,
   type EngineApi,
   type FilesChangedParams,
@@ -83,6 +84,7 @@ export function createEngineProxy(conn: MessageConnection): EngineApi {
     shutdown: () => request(Methods.shutdown),
     filesChanged: (p) => void conn.sendNotification(Notifications.filesChanged, p),
     filesOpened: (p) => void conn.sendNotification(Notifications.filesOpened, p),
+    setActive: (p) => void conn.sendNotification(Notifications.clientActivity, p),
     onProgress,
     onIndexError,
     onLog,
@@ -159,6 +161,7 @@ export function registerEngineHandlers(conn: MessageConnection, api: EngineApi):
 
   conn.onNotification(Notifications.filesChanged, (p: FilesChangedParams) => api.filesChanged(p));
   conn.onNotification(Notifications.filesOpened, (p: FilesOpenedParams) => api.filesOpened(p));
+  conn.onNotification(Notifications.clientActivity, (p: ActivityParams) => api.setActive(p));
 
   const subs = [
     api.onProgress((p) => void conn.sendNotification(Notifications.indexProgress, p)),

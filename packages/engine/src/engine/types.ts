@@ -10,6 +10,8 @@ export interface LocalEngineOptions {
   watch?: boolean;
   vectorPhase?: boolean;
   apiKeys?: Record<string, string>;
+  // false: start in the background, see EngineApi.setActive.
+  active?: boolean;
 }
 
 export interface LocalEngine extends EngineApi {

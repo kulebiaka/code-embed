@@ -51,6 +51,7 @@ function fakeApi(over: Partial<EngineApi> = {}): EngineApi {
     shutdown: vi.fn(async () => {}),
     filesChanged: vi.fn(),
     filesOpened: vi.fn(),
+    setActive: vi.fn(),
     onProgress: (cb) => {
       progress.add(cb);
       return { dispose: () => void progress.delete(cb) };
@@ -105,6 +106,7 @@ describe("engine proxy over Content-Length streams", () => {
     proxy.onLog((p) => logs.push(p));
     proxy.filesChanged({ created: ["/a"], changed: [], deleted: [] });
     proxy.filesOpened({ paths: ["/a"] });
+    proxy.setActive({ active: false });
     (api as unknown as { emitProgress: (p: IndexProgress) => void }).emitProgress({
       phase: "vector",
       done: 1,
@@ -117,6 +119,7 @@ describe("engine proxy over Content-Length streams", () => {
       expect(logs).toHaveLength(1);
       expect(api.filesChanged).toHaveBeenCalledWith({ created: ["/a"], changed: [], deleted: [] });
       expect(api.filesOpened).toHaveBeenCalledWith({ paths: ["/a"] });
+      expect(api.setActive).toHaveBeenCalledWith({ active: false });
     });
   });
 

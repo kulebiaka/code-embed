@@ -125,6 +125,12 @@ describe("settings page host", () => {
     ]);
   });
 
+  it("writes machine-wide settings to user settings in the workspace scope", async () => {
+    const t = setup();
+    await t.page.onMessage({ type: "update", key: "index.threads", value: 3 });
+    expect(t.update.mock.calls).toEqual([["index.threads", 3, vscode.ConfigurationTarget.Global]]);
+  });
+
   it("switches the provider after confirmation and restarts the engine", async () => {
     const t = setup();
     const warn = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValueOnce(undefined as never);
@@ -157,6 +163,32 @@ describe("settings page host", () => {
     expect(JSON.stringify(t.scopes)).not.toContain("secret");
     expect(t.keys.get("codeEmbed.apiKey.voyage")).toBe("secret");
     expect(t.supervisor.restart).toHaveBeenCalledOnce();
+  });
+
+  it("saves and uses a provider with a single restart", async () => {
+    const t = setup();
+    vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValueOnce("Switch" as never);
+    await t.page.onMessage({ type: "saveProvider", name: "voyage", config: voyage, apiKey: "secret", use: true });
+    expect(t.scopes.workspace.providers).toEqual({ voyage });
+    expect(t.scopes.workspace["embedding.provider"]).toBe("voyage");
+    expect(t.supervisor.restart).toHaveBeenCalledOnce();
+  });
+
+  it("copies and reveals the index folder and grants consent", async () => {
+    const t = setup();
+    Object.assign(t.client, {
+      lastStatus: { indexDir: "/r/.code-embed", consentRequired: { host: "api.openai.com", provider: "openai" } },
+      grantConsent: vi.fn(async () => undefined),
+    });
+    const write = vi.spyOn(vscode.env.clipboard, "writeText").mockResolvedValue(undefined as never);
+    vi.spyOn(vscode.window, "setStatusBarMessage").mockReturnValue(undefined as never);
+    const exec = vi.spyOn(vscode.commands, "executeCommand").mockResolvedValue(undefined as never);
+    await t.page.onMessage({ type: "action", action: "copyIndexPath" });
+    expect(write).toHaveBeenCalledWith("/r/.code-embed");
+    await t.page.onMessage({ type: "action", action: "revealIndex" });
+    expect(exec).toHaveBeenCalledWith("revealFileInOS", vscode.Uri.file("/r/.code-embed"));
+    await t.page.onMessage({ type: "action", action: "grantConsent" });
+    expect(t.client.grantConsent).toHaveBeenCalledWith({ host: "api.openai.com" });
   });
 
   it("renames a provider: moves its key and keeps it active", async () => {

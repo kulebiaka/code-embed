@@ -172,6 +172,45 @@ describe("LocalEngine", () => {
     });
   });
 
+  it("a background engine defers changes until it is active or searched", async () => {
+    const root = makeRepo();
+    const engine = await open(root);
+    await engine.ensureLexical();
+    engine.setActive({ active: false });
+    const file = join(root, "src/late.ts");
+    writeFileSync(file, "export function quokkaPipeline() { return 2; }\n");
+    engine.filesChanged({ created: [file], changed: [], deleted: [] });
+    await new Promise((r) => setTimeout(r, 200));
+    const before = (await engine.status()).files;
+    engine.setActive({ active: true });
+    await vi.waitFor(async () => expect((await engine.status()).files).toBe(before + 1));
+
+    engine.setActive({ active: false });
+    rmSync(file);
+    engine.filesChanged({ created: [], changed: [], deleted: [file] });
+    await new Promise((r) => setTimeout(r, 200));
+    expect((await engine.status()).files).toBe(before + 1);
+    const r = await engine.search({ query: "quokkaPipeline", mode: "lexical" });
+    expect(r.results).toHaveLength(0);
+  });
+
+  it("a background start embeds pending chunks but skips the scan until active", async () => {
+    const root = makeRepo();
+    const first = await open(root);
+    await first.ensureLexical();
+    await first.close();
+    writeFileSync(join(root, "src/extra.ts"), "export function zebraUnicornHandler() { return 1; }\n");
+    const engine = await open(root, { vectorPhase: true, active: false });
+    await vi.waitFor(async () => {
+      const st = await engine.status();
+      expect(st.chunks).toBeGreaterThan(0);
+      expect(st.embedded).toBe(st.chunks);
+    });
+    const files = (await engine.status()).files;
+    engine.setActive({ active: true });
+    await vi.waitFor(async () => expect((await engine.status()).files).toBe(files + 1));
+  });
+
   it("filesOpened and pause/resume do not break indexing", async () => {
     const root = makeRepo();
     const engine = await open(root);
@@ -260,6 +299,50 @@ describe("LocalEngine", () => {
       const s = await engine.status();
       expect(s.embedded).toBe(s.chunks);
     });
+  });
+
+  it("concurrent settings changes leave exactly one live embedder and vector phase", async () => {
+    const root = makeRepo();
+    const engine = await open(root);
+    await engine.indexAll({});
+
+    const { resolveEmbedder: actual } = await vi.importActual<typeof registry>("../embed/registry");
+    const created: { embedder: FakeEmbedder; disposed: boolean; calls: number }[] = [];
+    vi.mocked(registry.resolveEmbedder).mockImplementation(async (o) => {
+      const e = (await actual(o)) as FakeEmbedder;
+      const rec = { embedder: e, disposed: false, calls: 0 };
+      created.push(rec);
+      const dispose = e.dispose.bind(e);
+      e.dispose = async () => {
+        rec.disposed = true;
+        await dispose();
+      };
+      const embedDocuments = e.embedDocuments.bind(e);
+      e.embedDocuments = (texts, signal) => {
+        rec.calls++;
+        return embedDocuments(texts, signal);
+      };
+      return e;
+    });
+
+    vi.stubEnv("CODE_EMBED_FAKE_DIMS", "32");
+    await Promise.all([1, 2, 3].map((threads) => engine.updateSettings({ index: { threads } })));
+
+    expect(created).toHaveLength(3);
+    expect(created.slice(0, -1).every((r) => r.disposed)).toBe(true);
+    expect(created.at(-1)!.disposed).toBe(false);
+    await vi.waitFor(async () => {
+      const s = await engine.status();
+      expect(s.embedded).toBe(s.chunks);
+    });
+    expect(created.at(-1)!.calls).toBeGreaterThan(0);
+    const stale = created.slice(0, 2).map((r) => r.calls);
+    await engine.updateSettings({ model: { id: "other-model" } });
+    await vi.waitFor(async () => {
+      const s = await engine.status();
+      expect(s.embedded).toBe(s.chunks);
+    });
+    expect(created.slice(0, 2).map((r) => r.calls)).toEqual(stale);
   });
 
   it("lists providers and models, and tests a provider", async () => {

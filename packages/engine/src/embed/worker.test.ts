@@ -26,11 +26,12 @@ function expected(text: string): number[] {
 const made: Embedder[] = [];
 const tmp: string[] = [];
 
-function make(env: Record<string, string> = {}): Embedder {
+function make(env: Record<string, string> = {}, idleUnloadMs?: number): Embedder {
   const e = createWorkerEmbedder(getModel(DEFAULTS.model), OPTS, {
     modulePath: FIXTURE,
     execArgv: tsxExecArgv(),
     env: { ...process.env, ...env },
+    idleUnloadMs,
   });
   made.push(e);
   return e;
@@ -158,15 +159,41 @@ describe("createWorkerEmbedder", () => {
     expect((err as Error).message).toBe("fixture init failed");
   });
 
-  it("terminates the child on dispose and can start a new one afterwards", async () => {
+  it("terminates the child on dispose and never spawns another", async () => {
     const log = spawnLog();
     const e = make({ FIXTURE_SPAWN_LOG: log });
     await e.init();
     const [pid] = spawns(log);
     await e.dispose();
     expect(() => process.kill(pid!, 0)).toThrow();
-    await e.embedQueries(["again"]);
+    await expect(e.embedQueries(["again"])).rejects.toThrow("embedder disposed");
+    await expect(e.embedDocuments(["again"])).rejects.toThrow("embedder disposed");
+    await expect(e.init()).rejects.toThrow("embedder disposed");
+    expect(spawns(log)).toHaveLength(1);
+  });
+
+  it("unloads the model after an idle period and loads it again on demand", async () => {
+    const log = spawnLog();
+    const e = make({ FIXTURE_SPAWN_LOG: log }, 100);
+    await e.embedQueries(["first"]);
+    const [pid] = spawns(log);
+    await sleep(400);
+    expect(() => process.kill(pid!, 0)).toThrow();
+    const [v] = await e.embedQueries(["second"]);
+    expect(Array.from(v!)).toEqual(expected("second"));
     expect(spawns(log)).toHaveLength(2);
+  });
+
+  it("unload finishes in-flight work first", async () => {
+    const log = spawnLog();
+    const e = make({ FIXTURE_SPAWN_LOG: log, FIXTURE_BUSY_MS: "150" });
+    await e.init();
+    const [pid] = spawns(log);
+    const docs = e.embedDocuments(["a", "b"]);
+    await e.unload!();
+    expect((await docs).map((v) => Array.from(v))).toEqual([expected("a"), expected("b")]);
+    await sleep(300);
+    expect(() => process.kill(pid!, 0)).toThrow();
   });
 
   it.skipIf(process.platform === "win32")("lowers the child priority", async () => {

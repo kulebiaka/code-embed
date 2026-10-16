@@ -1,14 +1,43 @@
 import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import * as vscode from "vscode";
-import type { LineRange, SearchMode, SearchResponse } from "@code-embed/protocol/rpc";
+import type { LineRange, SearchMode } from "@code-embed/protocol/rpc";
 import { resultSelection } from "../commands/util";
 import { workspaceRoot } from "../settings";
 import type { EngineClient } from "../engine/types";
-import type { HostToWebview, PanelCommand, WebviewToHost } from "./messages";
+import type { HostToWebview, PanelCommand, SimilarSource, WebviewToHost } from "./messages";
 import type { PanelController } from "./types";
 
 const VIEW_ID = "codeEmbed.panel";
+const SOURCE_PREVIEW_LINES = 2;
+
+const LANGS: Record<string, string> = {
+  ts: "typescript",
+  tsx: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  py: "python",
+  go: "go",
+  rs: "rust",
+  java: "java",
+  kt: "kotlin",
+  rb: "ruby",
+  php: "php",
+  cs: "csharp",
+  c: "c",
+  h: "c",
+  cpp: "cpp",
+  hpp: "cpp",
+  swift: "swift",
+};
+
+function resolvePath(path: string): string {
+  const root = workspaceRoot();
+  return isAbsolute(path) || !root ? path : join(root, path);
+}
 
 export function buildHtml(
   webview: Pick<vscode.Webview, "cspSource" | "asWebviewUri">,
@@ -84,9 +113,28 @@ export class PanelProvider implements vscode.WebviewViewProvider, PanelControlle
     this.post({ type: "focusInput", query });
   }
 
-  async showSimilar(title: string, resp: SearchResponse): Promise<void> {
-    await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
-    this.post({ type: "results", requestId: 0, query: "", response: resp, title });
+  async findSimilar(path: string, range: LineRange, symbol: string | null = null, hideSameFile = true): Promise<void> {
+    try {
+      const [resp, lines] = await Promise.all([
+        this.client.findSimilar({ path, range, ...(hideSameFile ? { exclude: [path] } : {}) }),
+        this.sourceLines(path, range),
+      ]);
+      const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+      const similar: SimilarSource = { path, range, symbol, lang: LANGS[ext] ?? null, lines, hideSameFile };
+      await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
+      this.post({ type: "results", requestId: 0, query: "", response: resp, similar });
+    } catch (err) {
+      this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async sourceLines(path: string, range: LineRange): Promise<string[]> {
+    try {
+      const text = await readFile(resolvePath(path), "utf8");
+      return text.split(/\r?\n/).slice(range.startLine - 1, Math.min(range.endLine, range.startLine - 1 + SOURCE_PREVIEW_LINES));
+    } catch {
+      return [];
+    }
   }
 
   async onMessage(msg: WebviewToHost): Promise<void> {
@@ -109,7 +157,7 @@ export class PanelProvider implements vscode.WebviewViewProvider, PanelControlle
         vscode.window.setStatusBarMessage(`Copied ${msg.text}`, 2000);
         return;
       case "similar":
-        await this.similar(msg.path, msg.range);
+        await this.findSimilar(msg.path, msg.range, msg.symbol ?? null, msg.hideSameFile ?? true);
         return;
       case "command":
         await this.command(msg.command);
@@ -120,6 +168,8 @@ export class PanelProvider implements vscode.WebviewViewProvider, PanelControlle
   private async command(command: PanelCommand): Promise<void> {
     try {
       if (command === "index") await this.client.rebuild({ full: false });
+      else if (command === "pause") await this.client.pause();
+      else if (command === "resume") await this.client.resume();
       else await vscode.commands.executeCommand(command === "openSettings" ? "codeEmbed.openSettings" : "codeEmbed.showLog");
     } catch (err) {
       this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
@@ -160,18 +210,8 @@ export class PanelProvider implements vscode.WebviewViewProvider, PanelControlle
     }
   }
 
-  private async similar(path: string, range: LineRange): Promise<void> {
-    try {
-      const resp = await this.client.findSimilar({ path, range });
-      await this.showSimilar(`Similar to ${path}:${range.startLine}-${range.endLine}`, resp);
-    } catch (err) {
-      this.post({ type: "error", message: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
   private async open(path: string, range: LineRange, side = false): Promise<void> {
-    const root = workspaceRoot();
-    const uri = isAbsolute(path) || !root ? vscode.Uri.file(path) : vscode.Uri.file(join(root, path));
+    const uri = vscode.Uri.file(resolvePath(path));
     const doc = await vscode.workspace.openTextDocument(uri);
     const s = resultSelection(range, doc);
     const selection = new vscode.Range(s.startLine, s.startCharacter, s.endLine, s.endCharacter);
