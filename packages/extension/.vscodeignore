@@ -9,4 +9,6 @@ dist-vsix/**
 tsconfig.json
 .vscode-test/**
 !README.md
+!CHANGELOG.md
 !dist/engine/node_modules/**
+media/logo.svg

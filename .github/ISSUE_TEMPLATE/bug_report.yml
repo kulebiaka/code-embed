@@ -1,0 +1,42 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. code-embed index
+        2. code-embed "query"
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`code-embed --version` or the extension version"
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Where
+      multiple: true
+      options: [CLI, VS Code extension, Cursor / Windsurf, MCP, Other]
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: macOS 15 arm64, Node 22.13, VS Code 1.105, model qwen3-embedding-0.6b
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: CLI stderr or the output of "Code Embed: Show Log". Remove code you cannot share.
+      render: text

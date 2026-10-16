@@ -1,7 +1,7 @@
 {
   "version": 1,
   "mirror": {
-    "githubRepo": "code-embed/code-embed",
+    "githubRepo": "kulebiaka/code-embed",
     "tag": "models-v1"
   },
   "models": [

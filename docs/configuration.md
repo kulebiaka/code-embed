@@ -1,26 +1,26 @@
-# Конфигурация
+# Configuration
 
-## Приоритет
+## Precedence
 
-От высшего к низшему: флаги CLI, `.code-embed.toml` проекта, настройки редактора (VS Code `codeEmbed.*`), пользовательский `config.toml`, значения по умолчанию. Исключение: `threads` и `pause_on_battery` не задаются в проектном файле.
+From highest to lowest: CLI flags, the project's `.code-embed.toml`, editor settings (VS Code `codeEmbed.*`), the user `config.toml`, defaults. Exception: `threads` and `pause_on_battery` cannot be set in the project file.
 
-Пользовательские файлы (`config.toml`, `providers.toml`, `consents.toml`) лежат в каталоге конфигурации (переопределяется переменной `CODE_EMBED_CONFIG_DIR`). Глобальный кеш (`emb.db`, модели) лежит в каталоге кеша (`CODE_EMBED_CACHE_DIR`).
+User files (`config.toml`, `providers.toml`, `consents.toml`) live in the config directory (override with `CODE_EMBED_CONFIG_DIR`). The global cache (`emb.db`, models) lives in the cache directory (`CODE_EMBED_CACHE_DIR`).
 
 ## .code-embed.toml
 
-Файл в корне проекта. Он локальный и не коммитится: когда инструмент создаёт файл, он добавляет строку `.code-embed.toml` в `.gitignore` проекта, если её там нет.
+A file in the project root. It is local and not committed: when the tool creates it, it adds a `.code-embed.toml` line to the project's `.gitignore` if it is not there yet.
 
-| Ключ | Значения | По умолчанию |
+| Key | Values | Default |
 | --- | --- | --- |
-| `exclude` | массив масок путей | `[]` |
-| `embedding.provider` | `local` или имя провайдера | `local` |
-| `embedding.model` | id модели каталога | `qwen3-embedding-0.6b` |
-| `index.location` | `project` или `cache` | автоматически |
-| `index.max_file_kb` | число | 512 |
+| `exclude` | array of path globs | `[]` |
+| `embedding.provider` | `local` or a provider name | `local` |
+| `embedding.model` | catalog model id | `qwen3-embedding-0.6b` |
+| `index.location` | `project` or `cache` | automatic |
+| `index.max_file_kb` | number | 512 |
 | `search.default_mode` | `hybrid`, `semantic`, `lexical` | `hybrid` |
-| `search.top` | число | 20 |
+| `search.top` | number | 20 |
 
-Ключи `base_url`, `api_key`, `api_key_env` в проектном файле запрещены: адреса задаются только в `providers.toml`, ключи не хранятся в файлах.
+The keys `base_url`, `api_key` and `api_key_env` are not allowed in the project file: addresses are set only in `providers.toml`, and keys are never stored in files.
 
 ## providers.toml
 
@@ -45,31 +45,31 @@ rpm = 3000
 tpm = 1000000
 ```
 
-Поля: `kind` (сейчас только `openai`), `base_url`, `model` (обязательные), `query_prefix`, `doc_prefix`, `max_input_tokens`, `batch_size`, `concurrency`, `dimensions`, `api_key_env`, `rpm`, `tpm`. Ключ API не пишется в файл: укажите имя переменной окружения в `api_key_env`.
+Fields: `kind` (only `openai` for now), `base_url`, `model` (required), `query_prefix`, `doc_prefix`, `max_input_tokens`, `batch_size`, `concurrency`, `dimensions`, `api_key_env`, `rpm`, `tpm`. The API key is not written to the file: put the name of an environment variable in `api_key_env`.
 
-Тот же формат (без ключей) принимает настройка VS Code `codeEmbed.providers`; при совпадении имён она переопределяет `providers.toml`.
+The VS Code setting `codeEmbed.providers` accepts the same format (without keys); on a name clash it overrides `providers.toml`.
 
-Идентификатор модели в индексе: `<provider>/<model>@<dims>`.
+Model identifier in the index: `<provider>/<model>@<dims>`.
 
-## Локальные и внешние провайдеры
+## Local and external providers
 
-- Loopback (`localhost`, `127.0.0.1`, `::1`) и unix socket: локальный провайдер, без предупреждений.
-- Любой другой адрес: внешний. Перед первой отправкой кода нужно явное подтверждение для проекта («код будет отправлен на `<host>`»). Подтверждение хранится в `consents.toml`, общем для CLI и расширения. В CLI: интерактивный вопрос или `--allow-remote`.
+- Loopback (`localhost`, `127.0.0.1`, `::1`) and unix sockets: a local provider, no warnings.
+- Any other address: external. Before code is sent for the first time, explicit per-project consent is required ("code will be sent to `<host>`"). Consent is stored in `consents.toml`, shared by the CLI and the extension. In the CLI: an interactive prompt or `--allow-remote`.
 
-## Настройки VS Code
+## VS Code settings
 
-Все настройки из таблицы ниже доступны на странице `Code Embed: Open Settings` (шестерёнка в заголовке панели поиска). Там же добавляются провайдеры без правки JSON, проверяется соединение и задаются API-ключи. Ключи хранятся в secret storage VS Code и не попадают в `settings.json`. Изменения записываются в настройки пользователя или рабочей области, область выбирается вверху страницы. Исключение: `codeEmbed.index.threads` общая для машины и всегда пишется в настройки пользователя.
+Every setting in the table below is available on the `Code Embed: Open Settings` page (the gear in the search panel title). The same page adds providers without editing JSON, tests the connection and sets API keys. Keys are kept in VS Code secret storage and never land in `settings.json`. Changes are written to user or workspace settings; the scope is chosen at the top of the page. Exception: `codeEmbed.index.threads` is machine-wide and is always written to user settings.
 
-| Настройка | Тип | По умолчанию | Описание |
+| Setting | Type | Default | Description |
 | --- | --- | --- | --- |
-| `codeEmbed.index.location` | `auto` / `project` / `cache` | `auto` | где хранить индекс; `auto` уходит в кеш на рискованных файловых системах (сетевые диски, облачная синхронизация) |
-| `codeEmbed.index.maxFileKb` | число | 512 | файлы больше не индексируются |
-| `codeEmbed.index.threads` | целое | 0 | общее число потоков локальной модели на машину, для всех окон и проектов (0 = автоматически: половина ядер, не больше 4); задаётся только в настройках пользователя |
-| `codeEmbed.index.pauseOnBattery` | булево | false | приостанавливать векторную фазу на батарее |
-| `codeEmbed.index.exclude` | массив glob | `[]` | дополнительные исключения к `.gitignore`, `files.exclude` и `search.exclude` |
-| `codeEmbed.search.defaultMode` | `hybrid` / `semantic` / `lexical` | `hybrid` | режим поиска по умолчанию |
-| `codeEmbed.search.top` | целое | 20 | число результатов |
-| `codeEmbed.model.id` | строка | `qwen3-embedding-0.6b` | локальная модель из каталога |
-| `codeEmbed.model.offlineArchive` | строка | пусто | путь к оффлайн-архиву модели |
-| `codeEmbed.providers` | объект | `{}` | провайдеры: имя → конфигурация (без ключей) |
-| `codeEmbed.embedding.provider` | строка | `local` | `local` или имя провайдера |
+| `codeEmbed.index.location` | `auto` / `project` / `cache` | `auto` | where to store the index; `auto` falls back to the cache on risky file systems (network drives, cloud sync) |
+| `codeEmbed.index.maxFileKb` | number | 512 | larger files are not indexed |
+| `codeEmbed.index.threads` | integer | 0 | total local-model threads per machine, across all windows and projects (0 = automatic: half of the cores, at most 4); user settings only |
+| `codeEmbed.index.pauseOnBattery` | boolean | false | pause the vector phase on battery |
+| `codeEmbed.index.exclude` | glob array | `[]` | extra excludes on top of `.gitignore`, `files.exclude` and `search.exclude` |
+| `codeEmbed.search.defaultMode` | `hybrid` / `semantic` / `lexical` | `hybrid` | default search mode |
+| `codeEmbed.search.top` | integer | 20 | number of results |
+| `codeEmbed.model.id` | string | `qwen3-embedding-0.6b` | local model from the catalog |
+| `codeEmbed.model.offlineArchive` | string | empty | path to an offline model archive |
+| `codeEmbed.providers` | object | `{}` | providers: name → configuration (no keys) |
+| `codeEmbed.embedding.provider` | string | `local` | `local` or a provider name |

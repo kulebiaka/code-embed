@@ -4,10 +4,33 @@
   "description": "Local hybrid (semantic + lexical) code search for VS Code and AI agents",
   "publisher": "code-embed",
   "version": "0.1.0",
+  "icon": "media/logo.png",
+  "galleryBanner": {
+    "color": "#312e81",
+    "theme": "dark"
+  },
+  "categories": [
+    "Other",
+    "AI",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "search",
+    "semantic search",
+    "code search",
+    "embeddings",
+    "mcp",
+    "ai",
+    "agent"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/code-embed/code-embed.git"
+    "url": "https://github.com/kulebiaka/code-embed.git"
+  },
+  "homepage": "https://github.com/kulebiaka/code-embed#readme",
+  "bugs": {
+    "url": "https://github.com/kulebiaka/code-embed/issues"
   },
   "main": "./dist/extension.js",
   "engines": {

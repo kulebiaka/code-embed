@@ -1,81 +1,81 @@
-# План: общий процесс модели на машину
+# Plan: one shared model process per machine
 
-## Цель
+## Goal
 
-Одна копия локальной модели в памяти при любом числе окон VS Code, демонов, MCP-серверов и CLI. Сейчас у каждого движка свой процесс `__embed-worker`, и при N открытых проектах в худшем случае N копий модели (qwen3-embedding-0.6b до 2.5 ГБ каждая).
+One copy of the local model in memory regardless of how many VS Code windows, daemons, MCP servers and CLIs are running. Today every engine has its own `__embed-worker` process, so with N open projects there are up to N copies of the model (qwen3-embedding-0.6b takes up to 2.5 GB each).
 
-## Что уже есть
+## What already exists
 
-- Очередь `vector-slot/` в каталоге кеша: локальной моделью индексирует один проект за раз, активное окно идёт первым ([slot.ts](../../packages/engine/src/indexer/slot.ts)).
-- Выгрузка модели через 5 минут простоя ([worker.ts](../../packages/engine/src/embed/worker.ts)).
-- Приоритетная очередь запросов внутри процесса: запрос поиска, затем интерактивные документы, затем фоновые батчи.
+- The `vector-slot/` queue in the cache directory: only one project indexes with the local model at a time, and the active window goes first ([slot.ts](../../packages/engine/src/indexer/slot.ts)).
+- The model is unloaded after 5 minutes of inactivity ([worker.ts](../../packages/engine/src/embed/worker.ts)).
+- A prioritized request queue inside the process: search queries, then interactive documents, then background batches.
 
-Эти меры снимают одновременную индексацию, но не дубли модели: поисковый запрос в окне B, пока индексирует окно A, загружает в B вторую копию.
+These measures prevent concurrent indexing but not duplicate models: a search query in window B while window A is indexing loads a second copy in B.
 
-## Решение
+## Solution
 
-Отдельный процесс `code-embed __embed-host`, один на пару (модель, потоки) на машину. Движки подключаются к нему по сокету и не держат модель сами.
+A separate `code-embed __embed-host` process, one per (model, threads) pair per machine. Engines connect to it over a socket and do not hold the model themselves.
 
 ```
-окно A ─ engine ─┐
-окно B ─ engine ─┼── unix socket / named pipe ── embed-host (модель, общая очередь)
-CLI/MCP ─ engine ┘
+window A ─ engine ─┐
+window B ─ engine ─┼── unix socket / named pipe ── embed-host (model, shared queue)
+CLI/MCP  ─ engine ─┘
 ```
 
-### Обнаружение и запуск
+### Discovery and startup
 
-- Адрес сокета: `<tmp>/code-embed/embed-<hash(modelId, threads)>.sock`, на Windows `\\.\pipe\code-embed-embed-<hash>`; права 0600, как у демона.
-- Движок пробует подключиться; если сокета нет, запускает хост detached (как `daemon --detach`) и ждёт сокет до 15 с. Гонку двух запусков решает lock-файл `embed-host-<hash>.lock` в каталоге кеша: проигравший просто подключается.
-- Если хост не поднялся, движок откатывается на нынешний `createWorkerEmbedder` (свой процесс). Поведение без хоста не меняется.
+- Socket address: `<tmp>/code-embed/embed-<hash(modelId, threads)>.sock`, on Windows `\\.\pipe\code-embed-embed-<hash>`; mode 0600, like the daemon.
+- The engine tries to connect; if there is no socket, it starts the host detached (like `daemon --detach`) and waits up to 15 s for the socket. A race between two starts is settled by an `embed-host-<hash>.lock` file in the cache directory: the loser simply connects.
+- If the host does not come up, the engine falls back to today's `createWorkerEmbedder` (its own process). Behavior without a host stays the same.
 
-### Протокол
+### Protocol
 
-JSON-RPC (vscode-jsonrpc, как у демона). Векторы передаются как base64 от `Float32Array`: `serialization: "advanced"` есть только у IPC, не у сокета.
+JSON-RPC (vscode-jsonrpc, like the daemon). Vectors are sent as base64 of a `Float32Array`: `serialization: "advanced"` exists only for IPC, not for sockets.
 
-| Метод | Параметры | Ответ |
+| Method | Params | Response |
 | --- | --- | --- |
 | `hello` | `{ protocolVersion, modelId, threads, clientId, project }` | `{ dims, maxTokens }` |
 | `embed` | `{ kind: "query" \| "document", texts, prio: "query" \| "interactive" \| "batch" }` | `{ vectors: string[] }` |
-| `activity` | `{ active }` | — (уведомление) |
+| `activity` | `{ active }` | — (notification) |
 
-Отмена через `$/cancelRequest`: снимает задачу из очереди хоста.
+Cancellation via `$/cancelRequest` removes the task from the host's queue.
 
-### Очередь и справедливость
+### Queue and fairness
 
-- Три приоритета, как сейчас: `query` > `interactive` > `batch`.
-- Внутри `batch` round-robin по клиентам, активные клиенты (`activity`) идут первыми. Один проект не забирает модель до конца индексации, а батчи чередуются. После этого `vector-slot/` становится не нужен для локального провайдера и удаляется.
-- Не больше одного запроса в инференсе одновременно (как сейчас), саб-батчи и лимиты токенов те же ([local.ts](../../packages/engine/src/embed/local.ts)).
+- Three priorities, as today: `query` > `interactive` > `batch`.
+- Within `batch`, round-robin across clients, with active clients (`activity`) first. One project no longer holds the model until it finishes indexing; batches interleave. After that `vector-slot/` is no longer needed for the local provider and is removed.
+- At most one request in inference at a time (as today); sub-batches and token limits stay the same ([local.ts](../../packages/engine/src/embed/local.ts)).
 
-### Жизненный цикл
+### Lifecycle
 
-- Модель грузится по первому `embed`, выгружается через 5 минут простоя (логика из `worker.ts` переезжает в хост).
-- Хост завершается, когда нет клиентов дольше 10 минут.
-- Падение инференса: хост перезапускает свой дочерний процесс по нынешним правилам (3 падения подряд, пауза 10 минут). Падение самого хоста: клиенты получают `ProviderUnavailableError`, первый переподключившийся запускает новый хост.
-- Смена `index.threads` или модели: другой хеш, значит другой хост; старый закроется по простою.
+- The model is loaded on the first `embed` and unloaded after 5 minutes of inactivity (the logic moves from `worker.ts` into the host).
+- The host exits when it has had no clients for more than 10 minutes.
+- Inference crash: the host restarts its child process under today's rules (3 crashes in a row, 10-minute pause). Host crash: clients get `ProviderUnavailableError`, and the first one to reconnect starts a new host.
+- Changing `index.threads` or the model: a different hash, so a different host; the old one exits on inactivity.
 
-### Изменения в коде
+### Code changes
 
-1. `packages/engine/src/embed/host.ts`: сервер хоста, очередь с round-robin, переиспользует дочерний процесс через `createWorkerEmbedder`.
-2. `packages/engine/src/embed/host-client.ts`: `Embedder` поверх сокета, запуск и обнаружение хоста, откат на `createWorkerEmbedder`.
-3. `registry.ts`: для `local` с не-статической моделью возвращать клиента хоста.
-4. `cli/main.ts`: скрытая команда `__embed-host`.
-5. `service.ts`: передавать `setActive` в клиента хоста; убрать `vector-slot` для локального провайдера после перехода на хост.
-6. Документация: `docs/architecture.md`, раздел «Процесс инференса».
+1. `packages/engine/src/embed/host.ts`: the host server and round-robin queue, reusing the child process via `createWorkerEmbedder`.
+2. `packages/engine/src/embed/host-client.ts`: an `Embedder` over the socket, host startup and discovery, fallback to `createWorkerEmbedder`.
+3. `registry.ts`: return the host client for `local` with a non-static model.
+4. `cli/main.ts`: a hidden `__embed-host` command.
+5. `service.ts`: pass `setActive` to the host client; remove `vector-slot` for the local provider after switching to the host.
+6. Docs: `docs/architecture.md`, "Inference process" section.
 
-### Тесты
+### Tests
 
-- Юнит: очередь хоста (приоритеты, round-robin, активные вперёд), отмена, кодирование векторов.
-- Интеграция с фикстурой воркера: два клиента получают правильные векторы; один процесс инференса (`FIXTURE_SPAWN_LOG`); падение хоста и переподключение; гонка двух запусков; откат без хоста.
-- `eval/stage0/real-model.ts`: режим с тремя движками на одной машине; пик RSS дерева процессов не больше бюджета NR-08 одной модели плюс 3 × RSS движка.
+- Unit: the host queue (priorities, round-robin, active first), cancellation, vector encoding.
+- Integration with the worker fixture: two clients get correct vectors; a single inference process (`FIXTURE_SPAWN_LOG`); host crash and reconnect; a race between two starts; fallback without a host.
+- `eval/stage0/real-model.ts`: a mode with three engines on one machine; peak RSS of the process tree no higher than the NR-08 budget of one model plus 3 × engine RSS.
 
-### Риски
+### Risks
 
-- Задержка сокета против IPC: на запрос поиска добавляется около 1 мс, на фоне инференса незаметно.
-- Хост переживает окна VS Code: нужна надёжная остановка по простою и при обновлении расширения (версия в `hello`, при несовпадении клиент запускает свой хост под другим хешем).
-- Разные версии движка у CLI (npm) и VSIX: хеш сокета включает версию протокола хоста.
+- Socket vs IPC latency: about 1 ms added per search query, unnoticeable next to inference.
+- The host outlives VS Code windows: it needs a reliable idle shutdown and a shutdown on extension update (version in `hello`; on mismatch the client starts its own host under a different hash).
+- Different engine versions in the CLI (npm) and the VSIX: the socket hash includes the host protocol version.
 
-### Порядок работ
+### Order of work
 
-1. Хост и клиент за флагом `CODE_EMBED_SHARED_HOST=1`, тесты.
-2. Замер RSS и задержек в `real-model` на 1 и 3 проектах.
-3. Включение по умолчанию, удаление `vector-slot` для локального провайдера.
+1. Host and client behind a `CODE_EMBED_SHARED_HOST=1` flag, with tests.
+2. Measure RSS and latency in `real-model` with 1 and 3 projects.
+3. Enable by default, remove `vector-slot` for the local provider.

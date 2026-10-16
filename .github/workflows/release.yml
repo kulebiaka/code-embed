@@ -129,6 +129,7 @@ jobs:
           # the protocol package is bundled into dist/cli.js and is not published
           npm pkg delete dependencies.@code-embed/protocol
           cp ../../LICENSE .
+          node ../../scripts/npm-readme.mjs
           npm publish
       - name: Visual Studio Marketplace
         env:
@@ -141,7 +142,12 @@ jobs:
           for f in release/*.vsix; do
             pnpm --filter code-embed-vscode exec ovsx publish "$GITHUB_WORKSPACE/$f" -p "$OVSX_PAT"
           done
+      - name: Release notes from CHANGELOG.md
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v h="## [$v]" 'index($0, "## [") == 1 || /^\[[A-Za-z0-9.]+\]: / { if (f) exit; f = index($0, h) == 1; next } f' CHANGELOG.md > release/NOTES.md
+          test -s release/NOTES.md || { echo "CHANGELOG.md has no section for $v"; exit 1; }
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/*.vsix release/SHA256SUMS --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" release/*.vsix release/SHA256SUMS --title "$GITHUB_REF_NAME" --notes-file release/NOTES.md

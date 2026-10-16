@@ -1,54 +1,54 @@
-# Архитектура
+# Architecture
 
-## Монорепо
+## Monorepo
 
-- `packages/protocol`: типы JSON-RPC и инструментов (`search`, `find_similar`).
-- `packages/engine`: движок и CLI, npm-пакет `code-embed`.
-- `packages/extension`: расширение VS Code (VSIX с движком).
-- `eval/`: оценка качества, см. [eval/README.md](../eval/README.md).
+- `packages/protocol`: JSON-RPC and tool types (`search`, `find_similar`).
+- `packages/engine`: engine and CLI, npm package `code-embed`.
+- `packages/extension`: VS Code extension (VSIX with the engine bundled).
+- `eval/`: quality evaluation, see [eval/README.md](../eval/README.md).
 
-## Движок
+## Engine
 
-Node-процесс `code-embed` в режимах `serve` (JSON-RPC для расширения), `daemon` (движок + сокет + watcher), `mcp` (stdio MCP) и в виде команд CLI. Клиенты общаются с движком по JSON-RPC. Логи идут только в stderr.
+A `code-embed` Node process running as `serve` (JSON-RPC for the extension), `daemon` (engine + socket + watcher), `mcp` (stdio MCP) or as CLI commands. Clients talk to the engine over JSON-RPC. Logs go to stderr only.
 
-## Индекс
+## Index
 
-Корень проекта: каталог, для которого строится индекс. Индекс: `.code-embed/` в корне (`index.db`, `meta.json`, `lock`) либо в кеше пользователя (`index.location`). `index.db` это SQLite с FTS5 (лексика) и sqlite-vec (векторы). Глобальный кеш эмбеддингов `emb.db` в каталоге кеша переиспользуется между проектами; `code-embed gc` чистит неиспользуемое.
+Project root: the directory the index is built for. Index: `.code-embed/` in the root (`index.db`, `meta.json`, `lock`) or in the user cache (`index.location`). `index.db` is SQLite with FTS5 (lexical) and sqlite-vec (vectors). The global embedding cache `emb.db` in the cache directory is reused across projects; `code-embed gc` cleans out unused entries.
 
-## Индексация
+## Indexing
 
-1. Сканер обходит проект (`.gitignore`, `.ignore`, `exclude`), пропуская бинарные, минифицированные, слишком большие, сгенерированные файлы и lock-файлы.
-2. Чанкер режет файлы на чанки: функции, методы, классы, объявления (tree-sitter через WASM), разделы Markdown, окна для остального.
-3. Лексическая фаза заполняет FTS5; после неё поиск уже работает.
-4. Векторная фаза считает эмбеддинги чанков (локальная модель или провайдер) и пишет их в sqlite-vec. Идентификатор модели: `<provider>/<model>@<dims>`.
+1. The scanner walks the project (`.gitignore`, `.ignore`, `exclude`), skipping binary, minified, oversized and generated files as well as lock files.
+2. The chunker splits files into chunks: functions, methods, classes, declarations (tree-sitter via WASM), Markdown sections, and windows for everything else.
+3. The lexical phase fills FTS5; search already works after it.
+4. The vector phase computes chunk embeddings (local model or provider) and writes them to sqlite-vec. Model identifier: `<provider>/<model>@<dims>`.
 
-## Поиск
+## Search
 
-Гибридный поиск: BM25 и kNN выполняются отдельно и объединяются слиянием RRF (k = 60). Режимы `semantic` и `lexical` используют одну из частей. Перед поиском индекс по умолчанию обновляется (`--no-update` отключает).
+Hybrid search: BM25 and kNN run separately and are merged with RRF (k = 60). The `semantic` and `lexical` modes use one of the two. By default the index is updated before each search (`--no-update` turns that off).
 
-## Эмбеддинги
+## Embeddings
 
-Провайдер `local` исполняет ONNX-модель каталога (`models.json`: ревизия и sha256 каждого файла). Остальные провайдеры: OpenAI-совместимые API; внешние требуют подтверждения (`consents.toml`).
+The `local` provider runs an ONNX model from the catalog (`models.json`: revision and sha256 of every file). Other providers are OpenAI-compatible APIs; external ones require consent (`consents.toml`).
 
-### Процесс инференса
+### Inference process
 
-Локальная модель исполняется не в основном процессе движка, а в дочернем процессе `cli.js __embed-worker` с пониженным приоритетом (`PRIORITY_BELOW_NORMAL`). Основной процесс держит только очередь запросов, поэтому его JSON-RPC не блокируется инференсом. Очередь приоритетная: запросы поиска и «Найти похожий» обгоняют документы интерактивных файлов, а те обгоняют фоновую индексацию.
+The local model does not run in the engine's main process but in a child process `cli.js __embed-worker` with lowered priority (`PRIORITY_BELOW_NORMAL`). The main process only holds the request queue, so its JSON-RPC is never blocked by inference. The queue is prioritized: search and "Find Similar" requests overtake documents from interactive files, which in turn overtake background indexing.
 
-- Память ограничена тремя способами: инференс режется на саб-батчи по бюджету токенов (не больше 16 текстов, 1024 токена на батч), вход усекается до 1024 токенов, у сессии ONNX Runtime выключена CPU-арена (`enableCpuMemArena: false`). Из модели читаются только пулингованные выходы.
-- Бюджет памяти (NR-08 с утверждённым отступлением): для `qwen3-embedding-0.6b` потолок 2560 МБ на сумму процесса движка и процесса инференса; для моделей до 300M параметров 1024 МБ (временное утверждённое пользователем отступление от NR-08 с 700 МБ, оптимизация памяти малых моделей отложена); для `bge-m3` 1024 МБ.
-- Пока идёт векторная фаза, `search` (гибридный и семантический режимы) и «Найти похожий» ждут эмбеддинг запроса или фрагмента не дольше 800 мс (`INDEXING_EMBED_TIMEOUT_MS`). По таймауту ответ строится по лексике с `partial: true`, а `partialReason` содержит `timed out`. Вне индексации таймаута нет.
-- Одновременно локальной моделью индексирует только один проект на машине. Очередь живёт в каталоге кеша (`vector-slot/`): файл `holder` с pid владельца и файлы `wait-*` ожидающих. Пока проект ждёт, его фаза `queued` и модель для индексации не загружается, а лексический поиск и готовые векторы работают. Эмбеддинги поисковых запросов считаются вне очереди. Проект в активном окне идёт вперёд фоновых: фоновый владелец отдаёт очередь между батчами и выгружает модель. Число потоков модели (`index.threads`) общее для машины, по умолчанию половина ядер, не больше 4. Удалённые провайдеры в очереди не участвуют.
-- Процесс инференса завершается после 5 минут без запросов и запускается заново при следующем. Если проиндексировано всё, модель не загружается вовсе.
-- Фоновое окно: расширение сообщает движку `client.activity` (`active: false`), если окно VS Code не в фокусе дольше 30 секунд. Фоновый движок продолжает считать эмбеддинги уже найденных чанков, но не проверяет изменения: события watcher копятся, а стартовое сканирование откладывается. Всё накопленное применяется, когда окно снова в фокусе или приходит поиск. Демон считается фоновым, только если фоновые все подключённые клиенты.
-- Падение процесса инференса превращается в `ProviderUnavailableError("local inference process exited …")`: приходит `index.error`, `status.lastError` содержит `embedding provider unavailable: …`, а поиск отвечает лексикой с `partial: true`. Векторная фаза ждёт и перезапускает процесс; после 3 падений подряд она делает паузу на 10 минут.
+- Memory is bounded three ways: inference is split into sub-batches by token budget (at most 16 texts, 1024 tokens per batch), input is truncated to 1024 tokens, and the ONNX Runtime session has the CPU arena disabled (`enableCpuMemArena: false`). Only pooled outputs are read from the model.
+- Memory budget (NR-08 with an approved deviation): for `qwen3-embedding-0.6b` the ceiling is 2560 MB for the engine process plus the inference process combined; for models up to 300M parameters 1024 MB (a temporary user-approved deviation from NR-08's 700 MB, with small-model memory optimization deferred); for `bge-m3` 1024 MB.
+- While the vector phase is running, `search` (hybrid and semantic modes) and "Find Similar" wait at most 800 ms for the query or fragment embedding (`INDEXING_EMBED_TIMEOUT_MS`). On timeout the response is built from lexical results with `partial: true`, and `partialReason` contains `timed out`. Outside indexing there is no timeout.
+- Only one project per machine indexes with the local model at a time. The queue lives in the cache directory (`vector-slot/`): a `holder` file with the owner's pid and `wait-*` files for waiters. While a project waits, its phase is `queued` and the model is not loaded for indexing, but lexical search and existing vectors keep working. Query embeddings are computed outside the queue. The project in the active window goes ahead of background ones: a background holder yields the slot between batches and unloads the model. The number of model threads (`index.threads`) is machine-wide, by default half of the cores, at most 4. Remote providers do not take part in the queue.
+- The inference process exits after 5 minutes without requests and starts again on the next one. If everything is indexed, the model is never loaded.
+- Background window: the extension sends the engine `client.activity` (`active: false`) when the VS Code window has been out of focus for more than 30 seconds. A background engine keeps embedding chunks it has already found but does not look for changes: watcher events are queued and the startup scan is postponed. Everything queued is applied when the window regains focus or a search comes in. A daemon counts as background only if all connected clients are.
+- A crash of the inference process becomes `ProviderUnavailableError("local inference process exited …")`: an `index.error` is emitted, `status.lastError` contains `embedding provider unavailable: …`, and search answers from lexical results with `partial: true`. The vector phase waits and restarts the process; after 3 crashes in a row it pauses for 10 minutes.
 
-### Smoke-тест с реальной моделью
+### Real-model smoke test
 
-Быстрые тесты используют `CODE_EMBED_FAKE_EMBEDDER=1`, поэтому реальную модель под Electron из VS Code проверяет отдельный opt-in прогон (`eval/stage0/real-model.ts`). Он собирает VSIX под хост, запускает упакованный `dist/engine/cli.js serve` исполняемым файлом VS Code (на macOS это `Code Helper (Plugin)`) с `ELECTRON_RUN_AS_NODE=1`, как расширение, индексирует фикстуру с настоящей моделью и проверяет падения, пик RSS дерева процессов, отзывчивость `status` и поиска, задержку NR-07 и завершение без потомков:
+Fast tests use `CODE_EMBED_FAKE_EMBEDDER=1`, so the real model under VS Code's Electron is checked by a separate opt-in run (`eval/stage0/real-model.ts`). It builds a VSIX for the host, launches the packaged `dist/engine/cli.js serve` with the VS Code executable (on macOS, `Code Helper (Plugin)`) and `ELECTRON_RUN_AS_NODE=1`, just like the extension does, indexes a fixture with the real model and checks for crashes, the peak RSS of the process tree, `status` and search responsiveness, NR-07 latency and a clean exit without leftover children:
 
 ```bash
 pnpm build
 pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --model qwen3-embedding-0.6b --vscode min,stable --minutes 5
 ```
 
-Флаги, пороги и формат отчёта описаны в [eval/stage0/README.md](../eval/stage0/README.md). В CI это джоба `real-model` в `.github/workflows/native-smoke.yml` (ручной запуск с `real_model=true` и теги `v*`).
+Flags, thresholds and the report format are described in [eval/stage0/README.md](../eval/stage0/README.md). In CI this is the `real-model` job in `.github/workflows/native-smoke.yml` (manual run with `real_model=true`, and `v*` tags).

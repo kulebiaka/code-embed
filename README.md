@@ -1,74 +1,127 @@
-# code-embed
+<p align="center">
+  <img src="packages/extension/media/logo.png" width="112" alt="code-embed logo">
+</p>
 
-Локальный гибридный (семантический + лексический) поиск по коду. Один индекс в `<корень проекта>/.code-embed/`, движок на Node.js, клиенты: расширение VS Code, CLI и AI-агенты (LM Tools, MCP). Код не покидает машину, пока вы сами не подключите внешнего провайдера эмбеддингов.
+<h1 align="center">code-embed</h1>
 
-## Возможности
+<p align="center">
+  <b>Local hybrid code search — by meaning and by keywords.</b><br>
+  One index per project, shared by VS Code, the CLI and your AI agents. Your code never leaves the machine.
+</p>
 
-- Гибридный поиск: BM25 (SQLite FTS5) + kNN (sqlite-vec), слияние RRF. Режимы `hybrid`, `semantic`, `lexical`.
-- Запросы на естественном языке, в том числе на русском: `где обрабатывается возврат платежа`.
-- Поиск похожего кода (`similar`): по диапазону строк или по фрагменту из stdin.
-- Чанкинг по синтаксическому дереву (tree-sitter) для TypeScript/JavaScript, Python, Go, Rust, Java, C#, C, C++, PHP, Ruby, Kotlin; Markdown по разделам; остальное окнами.
-- Две фазы индексации: лексическая (поиск работает сразу) и векторная (в фоне).
-- Встроенные локальные модели эмбеддингов (ONNX) и любой OpenAI-совместимый API.
-- Расширение VS Code с панелью поиска, LM Tools `#semsearch` и `#similar`, MCP-сервер для Cursor, Windsurf, Claude Code.
-- Телеметрии нет.
+<p align="center">
+  <a href="https://github.com/kulebiaka/code-embed/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/kulebiaka/code-embed/ci.yml?branch=main&label=CI" alt="CI"></a>
+  <a href="https://github.com/kulebiaka/code-embed/releases"><img src="https://img.shields.io/github/v/release/kulebiaka/code-embed?sort=semver" alt="Release"></a>
+  <a href="https://www.npmjs.com/package/code-embed"><img src="https://img.shields.io/npm/v/code-embed?label=npm" alt="npm"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=code-embed.code-embed-vscode"><img src="https://img.shields.io/visual-studio-marketplace/v/code-embed.code-embed-vscode?label=VS%20Marketplace" alt="VS Marketplace"></a>
+  <a href="https://open-vsx.org/extension/code-embed/code-embed-vscode"><img src="https://img.shields.io/open-vsx/v/code-embed/code-embed-vscode?label=Open%20VSX" alt="Open VSX"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/kulebiaka/code-embed" alt="License: MIT"></a>
+</p>
 
-## Установка
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#agent-integration">Agents &amp; MCP</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="docs/cli.md">CLI reference</a> ·
+  <a href="docs/architecture.md">Architecture</a>
+</p>
+
+---
+
+```console
+$ code-embed -l -n 3 -g 'src/**' "process refund"
+src/payment/refund.ts:64:9:   async processPaymentRefund(request: RefundRequest): Promise<RefundResult> {
+src/payment/refund.ts:12:18: export interface RefundRequest {
+src/payment/refund.ts:25:7: const REFUND_WINDOW_DAYS = 90;
+
+$ code-embed "where is the token validated"         # hybrid: meaning + keywords
+$ code-embed similar src/payment/refund.ts:64-90    # code that looks like this
+```
+
+grep finds what you can spell. code-embed finds what you mean: *"retry with exponential backoff"*, *"where is the token validated"*, even queries in Russian. It combines BM25 keyword search with vector search over embeddings, so exact identifiers still rank where they should.
+
+## Features
+
+- **Hybrid search.** BM25 (SQLite FTS5) + kNN (sqlite-vec), merged with Reciprocal Rank Fusion. Modes: `hybrid`, `semantic`, `lexical`.
+- **Natural-language queries** in English, Russian and other languages.
+- **Find similar code** for a line range or a snippet from stdin — duplicates, near-copies, other places that need the same fix.
+- **Syntax-aware chunking** with tree-sitter for TypeScript/JavaScript, Python, Go, Rust, Java, C#, C, C++, PHP, Ruby and Kotlin; Markdown by section; sliding windows for everything else.
+- **Instant start.** Indexing runs in two phases: lexical (search works right away), then vector in the background.
+- **Bring your own embeddings.** Built-in local ONNX models, or any OpenAI-compatible API (Ollama, LM Studio, hosted providers).
+- **Built for agents.** VS Code LM Tools `#semsearch` and `#similar`, and an MCP server for Cursor, Windsurf and Claude Code.
+- **Private by default.** No telemetry. Nothing is sent anywhere unless you configure an external provider and confirm it.
+
+## Install
 
 ### VS Code / Cursor / Windsurf
 
-Установите расширение «Code Embed» из VS Code Marketplace или Open VSX (Cursor, Windsurf и другие форки используют Open VSX). VSIX собираются под каждую платформу и содержат движок. Модель по умолчанию (`qwen3-embedding-0.6b`, около 600 МБ) скачивается отдельно; команда `Code Embed: Install CLI` ставит CLI.
+Install **Code Embed** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=code-embed.code-embed-vscode) or [Open VSX](https://open-vsx.org/extension/code-embed/code-embed-vscode) (Cursor, Windsurf and other forks use Open VSX). VSIX packages are built per platform and include the engine. The default model (`qwen3-embedding-0.6b`, about 600 MB) is downloaded separately; `Code Embed: Install CLI` installs the CLI.
 
-Команды (палитра, категория «Code Embed»): Focus (`Ctrl+Alt+F` / `Cmd+Alt+F`), Quick Search, Find Similar Code, Reindex Workspace, Install CLI, Copy MCP Config, Select Embedding Provider, Select Model, Test Provider, Show Log, Open Settings. Open Settings (шестерёнка в заголовке панели поиска) открывает страницу настроек: статус индекса, выбор и проверка провайдеров, API-ключи, каталог моделей, параметры индексации и поиска.
+Commands (Command Palette, category "Code Embed"): Focus (`Ctrl+Alt+F` / `Cmd+Alt+F`), Quick Search, Find Similar Code, Reindex Workspace, Install CLI, Copy MCP Config, Select Embedding Provider, Select Model, Test Provider, Show Log, Open Settings. Open Settings (the gear in the search panel title) opens the settings page: index status, provider selection and testing, API keys, the model catalog, indexing and search options.
 
-В панели поиска: `Alt+↑`/`Alt+↓` переключают режим (hybrid, semantic, lexical), стрелки ходят по результатам, `Enter` открывает результат, `Ctrl+Enter` / `Cmd+Enter` открывает его сбоку, `←` переходит к файлу и сворачивает группу, `→` разворачивает, `Esc` возвращает в поле запроса. У результата есть кнопки «открыть сбоку», «скопировать путь:строку» и «найти похожий код».
+<details>
+<summary>Search panel keyboard shortcuts</summary>
+
+| Key | Action |
+| --- | --- |
+| `Alt+↑` / `Alt+↓` | switch mode (hybrid, semantic, lexical) |
+| `↑` / `↓` | move through results |
+| `Enter` | open the result |
+| `Ctrl+Enter` / `Cmd+Enter` | open to the side |
+| `←` / `→` | collapse to the file / expand |
+| `Esc` | back to the query field |
+
+Each result also has buttons to open it to the side, copy `path:line` and find similar code.
+
+</details>
 
 ### CLI
 
 ```bash
-npm i -g code-embed      # постоянная установка
-npx code-embed "запрос"  # без установки
+npm i -g code-embed      # install globally
+npx code-embed "query"   # or run without installing
 ```
 
-Требуется Node.js с поддержкой `node:sqlite` (см. `engines` в `packages/engine/package.json`). Оффлайн-установка модели: `code-embed model install --from FILE`.
+Requires Node.js 22.13+ (`node:sqlite`). Offline model install: `code-embed model install --from FILE`.
 
-## Быстрый старт
+## Quick start
 
 ```bash
 cd my-project
-code-embed model install            # один раз: скачать модель по умолчанию
-code-embed index                    # построить индекс (поиск также обновляет его сам)
+code-embed model install            # once: download the default model
+code-embed index                    # build the index (search also keeps it up to date)
 code-embed "retry with exponential backoff"
 code-embed -l -g 'src/**' -g '!**/*.test.ts' "parseConfig"
 code-embed similar src/api/client.ts:40-72
-code-embed --json -n 5 "где проверяется токен"
+code-embed --json -n 5 "where is the token validated"
 ```
 
 ## CLI
 
-Полный справочник: [docs/cli.md](docs/cli.md). Кратко:
+Full reference: [docs/cli.md](docs/cli.md). In short:
 
-| Команда | Назначение |
+| Command | Purpose |
 | --- | --- |
-| `code-embed [OPTIONS] <QUERY>` | поиск |
-| `code-embed similar <PATH>:<START>-<END>` / `similar -` | похожий код |
-| `code-embed index [--watch] [--full]` | индексация |
-| `code-embed status` / `stop` / `gc` / `clean` | состояние, остановка демона, сборка мусора, удаление индекса |
-| `code-embed daemon [--detach]` | демон: движок + сокет + watcher |
-| `code-embed mcp [--root DIR]` | MCP-сервер (stdio) |
-| `code-embed model install\|list` | управление моделями |
-| `code-embed provider list\|add\|test` | провайдеры эмбеддингов |
-| `code-embed export` / `import` | перенос индекса |
+| `code-embed [OPTIONS] <QUERY>` | search |
+| `code-embed similar <PATH>:<START>-<END>` / `similar -` | find similar code |
+| `code-embed index [--watch] [--full]` | build or update the index |
+| `code-embed status` / `stop` / `gc` / `clean` | status, stop the daemon, garbage-collect, delete the index |
+| `code-embed daemon [--detach]` | daemon: engine + socket + file watcher |
+| `code-embed mcp [--root DIR]` | MCP server (stdio) |
+| `code-embed model install\|list` | manage models |
+| `code-embed provider list\|add\|test` | embedding providers |
+| `code-embed export` / `import` | move an index between machines |
 
-Коды выхода: `0` успех, `1` нет результатов, `2` ошибка.
+Exit codes: `0` success, `1` no results, `2` error.
 
-## Конфигурация
+## Configuration
 
-Подробности и таблица настроек VS Code: [docs/configuration.md](docs/configuration.md). Приоритет: флаги CLI, затем `.code-embed.toml` проекта, затем настройки редактора, затем пользовательский `config.toml`, затем значения по умолчанию.
+Details and the full table of VS Code settings: [docs/configuration.md](docs/configuration.md). Precedence: CLI flags, then the project's `.code-embed.toml`, then editor settings, then the user `config.toml`, then defaults.
 
 ### .code-embed.toml
 
-Локальный файл в корне проекта, в MVP не коммитится: когда инструмент создаёт его, он добавляет строку `.code-embed.toml` в `.gitignore` (если её там нет).
+A local file in the project root that is not committed: when the tool creates it, it adds `.code-embed.toml` to `.gitignore` (if it is not there yet).
 
 ```toml
 exclude = ["vendor/**", "**/*.generated.ts"]
@@ -86,11 +139,11 @@ default_mode = "hybrid"
 top = 20
 ```
 
-Адреса и ключи в этот файл не допускаются.
+URLs and keys are not allowed in this file.
 
-### Провайдеры эмбеддингов
+### Embedding providers
 
-Провайдер `local` использует встроенную модель. Остальные описываются в `providers.toml` (каталог конфигурации пользователя) или в настройке `codeEmbed.providers`:
+The `local` provider uses a built-in model. Others are defined in `providers.toml` (in the user config directory) or in the `codeEmbed.providers` setting:
 
 ```toml
 [ollama]
@@ -105,26 +158,26 @@ model = "text-embedding-3-small"
 api_key_env = "EXAMPLE_API_KEY"
 ```
 
-Выбор: `embedding.provider = "remote"` в `.code-embed.toml`, `--provider remote` или команда `Code Embed: Select Embedding Provider`. Проверка: `code-embed provider test remote`.
+Select one with `embedding.provider = "remote"` in `.code-embed.toml`, `--provider remote`, or `Code Embed: Select Embedding Provider`. Test it: `code-embed provider test remote`.
 
-### Приватность
+### Privacy
 
-- Телеметрии нет. Сетевые обращения: скачивание модели и запросы к выбранному вами провайдеру.
-- Провайдер на loopback (`localhost`, `127.0.0.1`, `::1`) или unix socket считается локальным, без предупреждений.
-- Любой другой адрес считается внешним: перед первой отправкой кода требуется явное подтверждение для проекта («код будет отправлен на `<host>`»). Подтверждение хранится в `consents.toml`, общем для CLI и расширения. В CLI: интерактивный вопрос или `--allow-remote`.
-- API-ключи не хранятся в конфигах, только имя переменной окружения (`api_key_env`).
+- No telemetry. Network access is limited to downloading models and calling the provider you chose.
+- A provider on loopback (`localhost`, `127.0.0.1`, `::1`) or a unix socket is treated as local, with no warnings.
+- Any other address is external: before code is sent for the first time, you have to confirm it per project ("code will be sent to `<host>`"). Consent is stored in `consents.toml`, shared by the CLI and the extension. In the CLI: an interactive prompt or `--allow-remote`.
+- API keys are never stored in config files, only the name of an environment variable (`api_key_env`). The VS Code settings page keeps keys in secret storage.
 
-## Интеграция с агентами
+## Agent integration
 
-Подробности: [docs/agents.md](docs/agents.md). Все интерфейсы предоставляют два инструмента с общим контрактом: `search` и `find_similar`.
+Details: [docs/agents.md](docs/agents.md). Every interface exposes the same two tools with a shared contract: `search` and `find_similar`.
 
 ### VS Code (LM Tools)
 
-Инструменты агентов VS Code: `#semsearch` (поиск) и `#similar` (похожий код). Доступны, когда расширение активно.
+Agent tools in VS Code: `#semsearch` (search) and `#similar` (similar code). Available while the extension is active.
 
 ### MCP
 
-`code-embed mcp` запускает stdio MCP-сервер; корень проекта — текущая папка или `--root`. Команда `Code Embed: Copy MCP Config` кладёт в буфер JSON для `mcp.json` Cursor/Windsurf:
+`code-embed mcp` starts a stdio MCP server; the project root is the current directory or `--root`. `Code Embed: Copy MCP Config` copies JSON for Cursor/Windsurf `mcp.json` to the clipboard:
 
 ```json
 {
@@ -134,48 +187,81 @@ api_key_env = "EXAMPLE_API_KEY"
 }
 ```
 
-### Фрагмент для CLAUDE.md / AGENTS.md
+For Claude Code:
 
-```markdown
-## Поиск по коду
-
-- Для вопросов по смыслу («где обрабатывается X», «как работает Y»), поиска реализации
-  концепции, когда точные идентификаторы неизвестны, и для запросов на русском вызывай
-  `code-embed --json "<запрос>"` (или MCP-инструмент `search`). Сужай через `-g` / `include`
-  и `--lang`.
-- Перед рефакторингом или правкой бага ищи похожие места:
-  `code-embed --json similar <path>:<start>-<end>` (или `find_similar`).
-- Для точного идентификатора, строкового литерала, текста ошибки, имени файла и списка всех
-  использований символа используй grep/ripgrep, а не code-embed.
-- Результаты code-embed это ранжированные чанки; перед правкой прочитай указанные строки файла.
+```bash
+claude mcp add code-embed -- npx -y code-embed mcp --root /path/to/project
 ```
 
-## Модели
+### Snippet for CLAUDE.md / AGENTS.md
 
-Каталог встроенных моделей: `packages/engine/src/embed/models.json`. Модель по умолчанию `qwen3-embedding-0.6b`. Выбор: `codeEmbed.model.id`, `embedding.model`, `--model`. Список и статус установки: `code-embed model list`.
+```markdown
+## Code search
 
-| Модель | Размерность | Размер | Лицензия |
+- For questions about meaning ("where is X handled", "how does Y work"), finding the
+  implementation of a concept when exact identifiers are unknown, and queries in other
+  languages, run `code-embed --json "<query>"` (or the MCP tool `search`). Narrow with `-g` /
+  `include` and `--lang`.
+- Before a refactoring or a bug fix, look for similar places:
+  `code-embed --json similar <path>:<start>-<end>` (or `find_similar`).
+- For an exact identifier, string literal, error message, file name or a list of all usages
+  of a symbol, use grep/ripgrep, not code-embed.
+- code-embed results are ranked chunks; read the referenced lines of the file before editing.
+```
+
+## Models
+
+The built-in model catalog: `packages/engine/src/embed/models.json`. The default model is `qwen3-embedding-0.6b`. Choose one with `codeEmbed.model.id`, `embedding.model` or `--model`. List models and their install status: `code-embed model list`.
+
+| Model | Dimensions | Size | License |
 | --- | --- | --- | --- |
-| `qwen3-embedding-0.6b` | 1024 | 596 МБ | Apache-2.0 |
-| `embeddinggemma-300m` | 768 | 316 МБ | gemma |
-| `coderankembed-137m` | 768 | 133 МБ | MIT |
-| `multilingual-e5-small` | 384 | 129 МБ | MIT |
-| `bge-m3` | 1024 | 558 МБ | MIT |
-| `potion-code-16m` | 256 | 62 МБ | MIT |
+| `qwen3-embedding-0.6b` | 1024 | 596 MB | Apache-2.0 |
+| `embeddinggemma-300m` | 768 | 316 MB | gemma |
+| `coderankembed-137m` | 768 | 133 MB | MIT |
+| `multilingual-e5-small` | 384 | 129 MB | MIT |
+| `bge-m3` | 1024 | 558 MB | MIT |
+| `potion-code-16m` | 256 | 62 MB | MIT |
 
-Оценка качества на наборах запросов (Recall@10, MRR): [eval/README.md](eval/README.md).
+Quality evaluation on query datasets (Recall@10, MRR): [eval/README.md](eval/README.md).
 
-## Как это работает
+## How it works
 
-Подробности: [docs/architecture.md](docs/architecture.md). Сканер обходит проект с учётом `.gitignore`, пропуская бинарные, минифицированные, слишком большие и сгенерированные файлы; файлы режутся на чанки; лексическая фаза заполняет FTS5, векторная фаза считает эмбеддинги (с глобальным кешем `emb.db`) и пишет их в sqlite-vec. Поиск объединяет BM25 и kNN через RRF.
+```
+         VS Code panel · LM Tools · CLI · MCP
+                           │
+                           │ JSON-RPC
+                           ▼
+  project ──► ┌─────────────────────────┐ ──► index.db
+   files      │         engine          │     FTS5 (BM25) + sqlite-vec (kNN)
+              │  scan → chunk → index   │
+              │  lexical, then vectors  │ ──► emb.db
+              └────────────┬────────────┘     global embedding cache
+                           │
+                           ▼
+      local ONNX model  or  OpenAI-compatible API
+```
 
-## Лицензии
+Details: [docs/architecture.md](docs/architecture.md). The scanner walks the project respecting `.gitignore` and skips binary, minified, oversized and generated files; files are split into chunks; the lexical phase fills FTS5, and the vector phase computes embeddings (with the global `emb.db` cache) and writes them to sqlite-vec. Search merges BM25 and kNN with RRF.
 
-Продукт распространяется под лицензией MIT (файл [LICENSE](LICENSE)). Телеметрии нет.
+## Development
 
-Модели каталога скачиваются отдельно и сохраняют собственные лицензии:
+```bash
+pnpm install
+pnpm build          # engine, extension
+pnpm test           # vitest
+pnpm typecheck
+pnpm check:docs     # docs stay in sync with --help, settings and the model catalog
+```
 
-| Модель | Лицензия |
+The monorepo contains `packages/engine` (engine and CLI), `packages/extension` (VS Code extension), `packages/protocol` (shared JSON-RPC and tool types) and `eval/` (quality evaluation). See [CONTRIBUTING.md](CONTRIBUTING.md) for the release process and [CHANGELOG.md](CHANGELOG.md) for version history.
+
+## Licenses
+
+code-embed is released under the MIT license (see [LICENSE](LICENSE)). It collects no telemetry.
+
+Catalog models are downloaded separately and keep their own licenses:
+
+| Model | License |
 | --- | --- |
 | `qwen3-embedding-0.6b` | Apache-2.0 |
 | `embeddinggemma-300m` | gemma (Gemma Terms of Use) |
@@ -184,11 +270,11 @@ api_key_env = "EXAMPLE_API_KEY"
 | `bge-m3` | MIT |
 | `potion-code-16m` | MIT |
 
-Грамматики tree-sitter (WASM, пакет `tree-sitter-wasms`, рантайм `web-tree-sitter`):
+tree-sitter grammars (WASM, package `tree-sitter-wasms`, runtime `web-tree-sitter`):
 
-| Грамматика | Лицензия |
+| Grammar | License |
 | --- | --- |
-| `web-tree-sitter` (рантайм) | MIT |
+| `web-tree-sitter` (runtime) | MIT |
 | tree-sitter-typescript / tsx / javascript | MIT |
 | tree-sitter-python | MIT |
 | tree-sitter-go | MIT |
@@ -200,4 +286,4 @@ api_key_env = "EXAMPLE_API_KEY"
 | tree-sitter-ruby | MIT |
 | tree-sitter-kotlin | MIT |
 
-Сам пакет `tree-sitter-wasms` распространяется под Unlicense.
+The `tree-sitter-wasms` package itself is released under the Unlicense.

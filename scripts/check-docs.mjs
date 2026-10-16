@@ -11,24 +11,23 @@ const fail = (m) => errors.push(m);
 const DOCS = ["README.md", "docs/cli.md", "docs/configuration.md", "docs/agents.md", "docs/architecture.md"];
 
 const REQUIRED_HEADINGS = [
-  "# code-embed",
-  "## Возможности",
-  "## Установка",
+  "## Features",
+  "## Install",
   "### VS Code / Cursor / Windsurf",
   "### CLI",
-  "## Быстрый старт",
+  "## Quick start",
   "## CLI",
-  "## Конфигурация",
+  "## Configuration",
   "### .code-embed.toml",
-  "### Провайдеры эмбеддингов",
-  "### Приватность",
-  "## Интеграция с агентами",
+  "### Embedding providers",
+  "### Privacy",
+  "## Agent integration",
   "### VS Code (LM Tools)",
   "### MCP",
-  "### Фрагмент для CLAUDE.md / AGENTS.md",
-  "## Модели",
-  "## Как это работает",
-  "## Лицензии",
+  "### Snippet for CLAUDE.md / AGENTS.md",
+  "## Models",
+  "## How it works",
+  "## Licenses",
 ];
 
 const readme = read("README.md");
@@ -86,17 +85,17 @@ for (const flag of new Set(help.match(/--[a-z][a-z-]*/g) ?? [])) {
   if (!cli.includes(flag)) fail(`docs/cli.md: option "${flag}" is not mentioned`);
 }
 
-const licenseIdx = readmeLines.indexOf("## Лицензии");
+const licenseIdx = readmeLines.indexOf("## Licenses");
 const licenseLines = licenseIdx >= 0 ? readmeLines.slice(licenseIdx) : [];
 const models = JSON.parse(read("packages/engine/src/embed/models.json")).models;
 for (const m of models) {
   const has = (lines) => lines.some((l) => l.startsWith("|") && l.includes(`\`${m.id}\``) && l.includes(m.license));
   if (!has(readmeLines)) fail(`README.md: no table row with model "${m.id}" and license "${m.license}"`);
-  if (!has(licenseLines)) fail(`README.md: section "Лицензии" lacks model "${m.id}" with license "${m.license}"`);
+  if (!has(licenseLines)) fail(`README.md: section "Licenses" lacks model "${m.id}" with license "${m.license}"`);
 }
 const licenseText = licenseLines.join("\n");
-if (!/\bMIT\b/.test(licenseText)) fail('README.md: "Лицензии" must state the MIT license');
-if (!/телеметри/i.test(licenseText)) fail('README.md: "Лицензии" must state there is no telemetry');
+if (!/\bMIT\b/.test(licenseText)) fail('README.md: "Licenses" must state the MIT license');
+if (!/telemetry/i.test(licenseText)) fail('README.md: "Licenses" must state there is no telemetry');
 
 const manifest = JSON.parse(read("packages/extension/package.json"));
 const settings = [manifest.contributes?.configuration ?? []]

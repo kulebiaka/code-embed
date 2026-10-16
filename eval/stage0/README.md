@@ -1,37 +1,37 @@
-# Этап 0: проверка рантайма
+# Stage 0: runtime check
 
-Проверяет, что нативные и WASM-зависимости движка загружаются в текущем рантайме.
+Checks that the engine's native and WASM dependencies load in the current runtime.
 
 ```bash
-pnpm stage0                                                  # системный Node
-pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts   # Electron из VS Code (min из engines.vscode и stable)
+pnpm stage0                                                  # system Node
+pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts   # VS Code's Electron (min from engines.vscode and stable)
 ```
 
-На Linux без дисплея: `xvfb-run -a pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts`.
-CI: `.github/workflows/native-smoke.yml` (workflow_dispatch, теги `v*`, изменения package.json/lock).
+On Linux without a display: `xvfb-run -a pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts`.
+CI: `.github/workflows/native-smoke.yml` (workflow_dispatch, `v*` tags, package.json/lock changes).
 
-Отчёты — JSON в `eval/stage0/reports/` (или `STAGE0_REPORT_DIR`): `runtime-<platform>-<arch>.json`,
-`electron-<версия>-<platform>-<arch>.json`. Код выхода ненулевой, если упала обязательная проверка.
+Reports are JSON files in `eval/stage0/reports/` (or `STAGE0_REPORT_DIR`): `runtime-<platform>-<arch>.json`,
+`electron-<version>-<platform>-<arch>.json`. The exit code is non-zero if a required check fails.
 
-## Как читать отчёт
+## Reading the report
 
-- `ok` — все обязательные проверки прошли; `failedRequired` — имена упавших обязательных; `warnings` — упавшие необязательные.
-- `checks[].status`: `pass` / `fail` (обязательная) / `warn` (необязательная); `detail` и `error` поясняют результат.
-- Обязательные: `node:sqlite`, `sqlite-vec:load` (`DatabaseSync({allowExtension:true})` + `loadExtension`),
+- `ok` — all required checks passed; `failedRequired` — names of failed required checks; `warnings` — failed optional ones.
+- `checks[].status`: `pass` / `fail` (required) / `warn` (optional); `detail` and `error` explain the result.
+- Required: `node:sqlite`, `sqlite-vec:load` (`DatabaseSync({allowExtension:true})` + `loadExtension`),
   `fts5:unicode61`, `vec0:int8-knn`, `onnxruntime-node`, `@parcel/watcher`, `web-tree-sitter`, `hash-wasm`.
-- Необязательная: `@napi-rs/keyring` (на headless Linux нет secret service — это предупреждение, не отказ).
-- В отчёте Electron поля `electron` и `node` показывают версию Electron и его встроенного Node.
+- Optional: `@napi-rs/keyring` (headless Linux has no secret service; this is a warning, not a failure).
+- In the Electron report, the `electron` and `node` fields show the Electron version and its bundled Node.
 
-## Правило решения (R-128, Q-28)
+## Decision rule (R-128, Q-28)
 
-Если `node:sqlite` или `allowExtension`/`loadExtension` не работает хотя бы в одном рантайме
-(системный Node >= 22.13 или Electron из целевой версии VS Code) на любом таргете, хранилище
-переключается на `better-sqlite3` >= 13 за тем же интерфейсом хранилища (R-05); минимальная версия Node
-тогда понижается до 20. Иначе фиксируется минимальная версия Node из таблицы ниже.
+If `node:sqlite` or `allowExtension`/`loadExtension` does not work in at least one runtime
+(system Node >= 22.13 or the Electron of the target VS Code version) on any target, storage
+switches to `better-sqlite3` >= 13 behind the same storage interface (R-05), and the minimum Node version
+drops to 20. Otherwise the minimum Node version from the table below is fixed.
 
-## Результаты по таргетам (заполняет человек)
+## Results per target (filled in by a human)
 
-| Таргет | Node (версия) | node:sqlite + vec + FTS5 | Electron min VS Code (Electron / Node) | Electron stable (Electron / Node) | onnx / watcher / tree-sitter / hash-wasm | keyring |
+| Target | Node (version) | node:sqlite + vec + FTS5 | Electron min VS Code (Electron / Node) | Electron stable (Electron / Node) | onnx / watcher / tree-sitter / hash-wasm | keyring |
 | --- | --- | --- | --- | --- | --- | --- |
 | win32-x64 | | | | | | |
 | win32-arm64 | | | | | | |
@@ -40,49 +40,48 @@ CI: `.github/workflows/native-smoke.yml` (workflow_dispatch, теги `v*`, из
 | linux-x64 | | | | | | |
 | linux-arm64 | | | | | | |
 
-Решение по Q-28 (минимальная версия Node, рантайм SQLite): _заполнить после прогона_.
+Q-28 decision (minimum Node version, SQLite runtime): _fill in after the run_.
 
-## Smoke реальной модели под Electron VS Code (R-123, NR-08)
+## Real-model smoke under VS Code's Electron (R-123, NR-08)
 
-Opt-in регрессия: упакованный движок из VSIX запускается исполняемым файлом VS Code (macOS: `Code Helper (Plugin)`) с `ELECTRON_RUN_AS_NODE=1`, как в расширении, индексирует фикстуру с настоящей моделью. Быстрые тесты работают с фейковым эмбеддером и этого не покрывают.
+An opt-in regression run: the packaged engine from the VSIX is launched with the VS Code executable (macOS: `Code Helper (Plugin)`) and `ELECTRON_RUN_AS_NODE=1`, as in the extension, and indexes a fixture with a real model. The fast tests use a fake embedder and do not cover this.
 
 ```bash
 pnpm build
 pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts \
-  [--model <id[,id…]>]        # по умолчанию qwen3-embedding-0.6b
-  [--vscode <ver[,ver…]>]     # по умолчанию stable; "min" = минимальная из engines.vscode
-  [--engine <path/to/cli.js>] # по умолчанию: собрать VSIX под хост и распаковать
-  [--repo <dir>]              # по умолчанию: стресс-фикстура (stress-fixture.ts)
-  [--minutes <n>]             # окно наблюдения, по умолчанию 5
-  [--min-embedded <n>]        # по умолчанию 300
+  [--model <id[,id…]>]        # default qwen3-embedding-0.6b
+  [--vscode <ver[,ver…]>]     # default stable; "min" = the minimum from engines.vscode
+  [--engine <path/to/cli.js>] # default: build a VSIX for the host and unpack it
+  [--repo <dir>]              # default: the stress fixture (stress-fixture.ts)
+  [--minutes <n>]             # observation window, default 5
+  [--min-embedded <n>]        # default 300
 ```
 
-Окружение: `REAL_MODEL_REPORT_DIR` (по умолчанию `eval/reports/real-model`), `CODE_EMBED_MODELS_DIR` (общий каталог моделей; по умолчанию кеш движка), `VSCODE_TEST_CACHE` (кеш VS Code, по умолчанию `$TMPDIR/code-embed-vscode-test`). Каждый прогон использует временные `CODE_EMBED_CACHE_DIR` (с ссылкой `models` на общий каталог и пустым `emb.db`) и `CODE_EMBED_CONFIG_DIR`. Если установленный VS Code не запускается (например, битая подпись), он скачивается заново. Код выхода 0, если все проверки всех комбинаций модель × версия зелёные.
+Environment: `REAL_MODEL_REPORT_DIR` (default `eval/reports/real-model`), `CODE_EMBED_MODELS_DIR` (shared model directory; defaults to the engine cache), `VSCODE_TEST_CACHE` (VS Code cache, default `$TMPDIR/code-embed-vscode-test`). Each run uses temporary `CODE_EMBED_CACHE_DIR` (with a `models` link to the shared directory and an empty `emb.db`) and `CODE_EMBED_CONFIG_DIR`. If the installed VS Code does not start (for example, a broken signature), it is downloaded again. Exit code 0 means every check of every model × version combination is green.
 
-Наблюдение идёт до `embedded === chunks` или конца окна (время загрузки модели в окно не входит). Пробы: RSS дерева процессов (`ps`, каждые 250 мс; на Windows пропускается), `status` (1 с), лексический поиск (2 с), гибридный (5 с, когда есть векторы), `findSimilar` (10 с), NR-07 (однократно, ≥ 20 с после первых векторов).
+Observation lasts until `embedded === chunks` or the end of the window (model load time is not counted). Probes: process tree RSS (`ps`, every 250 ms; skipped on Windows), `status` (1 s), lexical search (2 s), hybrid (5 s, once vectors exist), `findSimilar` (10 s), NR-07 (once, ≥ 20 s after the first vectors).
 
-| Проверка | Порог |
+| Check | Threshold |
 | --- | --- |
-| `no-crash` | нет выхода движка до `shutdown`; в ошибках нет `inference process exited`, `SIGTRAP`, `SIGABRT`, `SIGSEGV` |
+| `no-crash` | no engine exit before `shutdown`; no `inference process exited`, `SIGTRAP`, `SIGABRT`, `SIGSEGV` in errors |
 | `progress` | `embedded ≥ min(--min-embedded, chunks)` |
-| `rss` | пик суммы дерева: 2560 МБ для `qwen3-embedding-0.6b`, 1024 МБ для `bge-m3`, 1024 МБ для остальных (моделей ≤ 300M; временное утверждённое пользователем отступление от NR-08 с 700 МБ) |
-| `status-p95`, `lexical-p95` | ≤ 200 мс |
-| `nr07` | ≤ 1000 мс от записи файла до появления идентификатора в лексическом поиске |
-| `hybrid-during-indexing`, `find-similar-during-indexing` | p95 и max ≤ 1300 мс; ответ дольше 800 мс обязан быть `partial: true` с `timed out` |
-| `shutdown` | выход ≤ 10 с, потомков не осталось |
-| `stress-indexed` | файлы `stress/*` найдены лексическим поиском (только для стресс-фикстуры) |
+| `rss` | peak tree total: 2560 MB for `qwen3-embedding-0.6b`, 1024 MB for `bge-m3`, 1024 MB for the rest (models ≤ 300M; a temporary user-approved deviation from NR-08's 700 MB) |
+| `status-p95`, `lexical-p95` | ≤ 200 ms |
+| `nr07` | ≤ 1000 ms from a file write to the identifier showing up in lexical search |
+| `hybrid-during-indexing`, `find-similar-during-indexing` | p95 and max ≤ 1300 ms; a response slower than 800 ms must be `partial: true` with `timed out` |
+| `shutdown` | exit ≤ 10 s, no children left |
+| `stress-indexed` | `stress/*` files are found by lexical search (stress fixture only) |
 
-Пороги заданы константами в `real-model-report.ts`; ослаблять их при красном результате нельзя, это дефект продукта.
+Thresholds are constants in `real-model-report.ts`; do not relax them when the result is red — that is a product defect.
 
-### Как читать отчёт
+### Reading the report
 
-Файл `real-model-<model>-<vscode>-<platform>-<arch>.json` и рядом `….engine.log` (stderr движка).
+The file `real-model-<model>-<vscode>-<platform>-<arch>.json` with `….engine.log` (engine stderr) next to it.
 
-- `rssMb`: `peakTree` (сумма), `peakEngine` (основной процесс), `peakInference` (`__embed-worker`), `enginePeakPhase` (фаза, на которой основной процесс достиг пика).
-- `fixture`: файлы, чанки, размер `index.db`; `embedded`, `chunksPerSec`.
-- `latency`: перцентили `status` и лексического поиска; для гибридного и `findSimilar` во время индексации ещё `semanticShare` (доля ответов с семантикой) и `timedOutShare` (доля ответов по таймауту).
-- `checks[]`: вердикт по каждой проверке (`pass` / `fail` / `skip`) с подробностью; `ok` равен нулю провалов.
-- `timeline`: ход индексации; `errors`: все `index.error` и `status.lastError`.
+- `rssMb`: `peakTree` (total), `peakEngine` (main process), `peakInference` (`__embed-worker`), `enginePeakPhase` (the phase at which the main process peaked).
+- `fixture`: files, chunks, `index.db` size; `embedded`, `chunksPerSec`.
+- `latency`: percentiles for `status` and lexical search; for hybrid and `findSimilar` during indexing also `semanticShare` (share of answers with semantics) and `timedOutShare` (share of answers that timed out).
+- `checks[]`: a verdict per check (`pass` / `fail` / `skip`) with details; `ok` means zero failures.
+- `timeline`: indexing progress; `errors`: every `index.error` and `status.lastError`.
 
-CI: джоба `real-model` в `native-smoke.yml` (macos-14, ubuntu-22.04, windows-2022).
-
+CI: the `real-model` job in `native-smoke.yml` (macos-14, ubuntu-22.04, windows-2022).

@@ -1,50 +1,50 @@
 # eval
 
-Оценка качества поиска: прогон запросов через движок в процессе, метрики Recall@10 и MRR, бенчмарк моделей.
+Search quality evaluation: queries run through the engine in-process, Recall@10 and MRR metrics, and a model benchmark.
 
-## Формат набора
+## Dataset format
 
-- `repos.json` — массив `EvalRepo` (`name`, `url`, закреплённый `commit`, `languages`, `license`).
-- `datasets/<repo>.jsonl` — по одной строке `EvalQuery`: `id`, `repo`, `query`, `lang` (`ru` | `en`), `expected` (список `{path, startLine, endLine}`, строки 1-based включительно), необязательные `tags`.
-- Клоны — `.repos/<name>` (в gitignore), получаются `pnpm --filter @code-embed/eval run fetch-repos`.
-- Проверка набора: `pnpm --filter @code-embed/eval run validate-dataset`.
+- `repos.json` — an array of `EvalRepo` (`name`, `url`, pinned `commit`, `languages`, `license`).
+- `datasets/<repo>.jsonl` — one `EvalQuery` per line: `id`, `repo`, `query`, `lang` (`ru` | `en`), `expected` (a list of `{path, startLine, endLine}`, lines 1-based inclusive), optional `tags`.
+- Clones live in `.repos/<name>` (gitignored) and are fetched with `pnpm --filter @code-embed/eval run fetch-repos`.
+- Dataset validation: `pnpm --filter @code-embed/eval run validate-dataset`.
 
-## Метрики
+## Metrics
 
-Топ-10 результатов запроса сравниваются с `expected`.
+The top 10 results of a query are compared with `expected`.
 
-- Попадание: тот же `path` и пересечение диапазонов строк результата и ожидаемого чанка.
-- Recall@10 запроса — доля ожидаемых чанков, найденных в топ-10 (при одном ожидаемом чанке — 0 или 1); итог — среднее по запросам.
-- MRR — среднее `1 / ранг` первого результата, попавшего в любой ожидаемый чанк (0, если в топ-10 нет попаданий).
-- Метрики считаются для всех запросов, для `ru`, для `en` и по репозиториям. Русская метрика информационная, порога у неё нет.
-- NR-10: Recall@10 гибрида должен быть не ниже максимума из lexical и semantic. Отчёт показывает вердикт; ненулевой код возврата только с `--strict`.
+- Hit: the same `path` and overlapping line ranges between the result and the expected chunk.
+- Recall@10 of a query is the share of expected chunks found in the top 10 (0 or 1 with a single expected chunk); the total is the mean over queries.
+- MRR is the mean of `1 / rank` of the first result that hits any expected chunk (0 if there is no hit in the top 10).
+- Metrics are computed for all queries, for `ru`, for `en` and per repository. The Russian metric is informational and has no threshold.
+- NR-10: hybrid Recall@10 must be no lower than the maximum of lexical and semantic. The report shows the verdict; the exit code is non-zero only with `--strict`.
 
-## Запуск
+## Running
 
 ```bash
 pnpm --filter @code-embed/eval run fetch-repos
-pnpm --filter @code-embed/eval run eval                      # модель по умолчанию, все режимы
-pnpm --filter @code-embed/eval run eval -- --fake --limit 10 # смоук с FakeEmbedder, без моделей
+pnpm --filter @code-embed/eval run eval                      # default model, all modes
+pnpm --filter @code-embed/eval run eval -- --fake --limit 10 # smoke run with FakeEmbedder, no models
 ```
 
-Флаги `eval`: `--model <id>`, `--mode lexical|semantic|hybrid|all`, `--repos a,b`, `--limit N` (первые N запросов каждого репозитория), `--fake`, `--strict`, `--out <каталог>`, `--name <имя файла>`.
+`eval` flags: `--model <id>`, `--mode lexical|semantic|hybrid|all`, `--repos a,b`, `--limit N` (first N queries of each repository), `--fake`, `--strict`, `--out <dir>`, `--name <file name>`.
 
-Каждый репозиторий индексируется во временный каталог кеша (индекс и кеш эмбеддингов не попадают в клоны и в пользовательский кеш; загруженные модели берутся из обычного кеша моделей). Отчёты — `reports/*.json` и `reports/*.md`: метрики по режимам, по репозиториям, время индексации, чанков/с, пиковый RSS, задержка поиска p50/p95, вердикт NR-10.
+Each repository is indexed into a temporary cache directory (the index and embedding cache never land in the clones or the user cache; downloaded models are taken from the regular model cache). Reports go to `reports/*.json` and `reports/*.md`: metrics per mode and per repository, indexing time, chunks/s, peak RSS, search latency p50/p95, and the NR-10 verdict.
 
 ## CI
 
-`.github/workflows/eval.yml` запускает `eval --strict` с моделью по умолчанию на PR, меняющих `packages/engine/src/chunk/**`, `lex/**`, `embed/**` или `eval/**`. Кеш моделей — `actions/cache`, отчёт сохраняется артефактом `eval-report`.
+`.github/workflows/eval.yml` runs `eval --strict` with the default model on PRs that touch `packages/engine/src/chunk/**`, `lex/**`, `embed/**` or `eval/**`. Models are cached with `actions/cache`; the report is saved as the `eval-report` artifact.
 
-## Бенчмарк моделей (ручной шаг)
+## Model benchmark (manual step)
 
 ```bash
 pnpm --filter @code-embed/eval run bench
 ```
 
-Прогоняет все модели каталога на CPU, каждую в отдельном процессе (чтобы пиковый RSS не накапливался), и пишет `reports/bench-<время>.md/json`: время индексации, чанков/с, пиковый RSS, p50/p95 поиска, Recall@10 и MRR (общие и ru, режим hybrid). Флаги: `--models a,b`, `--repos`, `--limit`, `--fake`.
+Runs every catalog model on CPU, each in its own process (so peak RSS does not accumulate), and writes `reports/bench-<time>.md/json`: indexing time, chunks/s, peak RSS, search p50/p95, Recall@10 and MRR (overall and ru, hybrid mode). Flags: `--models a,b`, `--repos`, `--limit`, `--fake`.
 
-Полный прогон требует загрузки моделей и выполняется на эталонной машине (Apple M1 или Ryzen 7 5800U, 16 ГБ). Модель по умолчанию `qwen3-embedding-0.6b` зафиксирована и бенчмарком не пересматривается.
+A full run needs the models downloaded and runs on the reference machine (Apple M1 or Ryzen 7 5800U, 16 GB). The default model `qwen3-embedding-0.6b` is fixed and is not reconsidered by the benchmark.
 
-### Результаты эталонной машины
+### Reference machine results
 
-Не заполнено: вписать таблицу из `reports/bench-*.md` после ручного прогона.
+Not filled in yet: paste the table from `reports/bench-*.md` after a manual run.

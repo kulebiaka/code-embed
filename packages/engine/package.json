@@ -2,6 +2,20 @@
   "name": "code-embed",
   "version": "0.1.0",
   "description": "Local hybrid (semantic + lexical) code search",
+  "keywords": [
+    "code-search",
+    "semantic-search",
+    "embeddings",
+    "hybrid-search",
+    "mcp",
+    "cli",
+    "bm25",
+    "sqlite"
+  ],
+  "homepage": "https://github.com/kulebiaka/code-embed#readme",
+  "bugs": {
+    "url": "https://github.com/kulebiaka/code-embed/issues"
+  },
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -17,7 +31,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/code-embed/code-embed.git",
+    "url": "git+https://github.com/kulebiaka/code-embed.git",
     "directory": "packages/engine"
   },
   "publishConfig": {

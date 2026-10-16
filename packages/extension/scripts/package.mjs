@@ -176,7 +176,7 @@ async function main() {
     await writeFile(join(dist, "engine/package.json"), JSON.stringify({ type: "module" }));
 
     if (existsSync(join(extDir, "media"))) await cp(join(extDir, "media"), join(stage, "media"), { recursive: true });
-    for (const f of ["LICENSE", "README.md"]) {
+    for (const f of ["LICENSE", "README.md", "CHANGELOG.md"]) {
       if (existsSync(join(rootDir, f))) await cp(join(rootDir, f), join(stage, f));
     }
     if (existsSync(join(extDir, ".vscodeignore"))) await cp(join(extDir, ".vscodeignore"), join(stage, ".vscodeignore"));

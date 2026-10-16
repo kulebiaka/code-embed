@@ -49,7 +49,7 @@ describe("catalog", () => {
   });
 
   it("points the mirror at GitHub Releases", () => {
-    expect(manifest.mirror).toEqual({ githubRepo: "code-embed/code-embed", tag: "models-v1" });
+    expect(manifest.mirror).toEqual({ githubRepo: "kulebiaka/code-embed", tag: "models-v1" });
   });
 
   it("throws on unknown model", () => {

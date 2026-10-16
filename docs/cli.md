@@ -1,41 +1,41 @@
 # CLI
 
-`code-embed` (npm-пакет `code-embed`). Справка: `code-embed --help`, версия: `code-embed --version`. stdout занят результатами, логи и подсказки идут в stderr.
+`code-embed` (npm package `code-embed`). Help: `code-embed --help`, version: `code-embed --version`. stdout carries results only; logs and hints go to stderr.
 
-## Коды выхода
+## Exit codes
 
-| Код | Значение |
+| Code | Meaning |
 | --- | --- |
-| 0 | успех |
-| 1 | поиск выполнен, результатов нет |
-| 2 | ошибка (неверные аргументы, отказ от подтверждения и т. п.) |
+| 0 | success |
+| 1 | search ran, no results |
+| 2 | error (invalid arguments, consent declined, etc.) |
 
-## Поиск
+## Search
 
 ```
 code-embed [OPTIONS] <QUERY>
 ```
 
-| Опция | Описание |
+| Option | Description |
 | --- | --- |
-| `-s`, `--semantic` | только семантический поиск |
-| `-l`, `--lexical` | только лексический поиск |
-| `-H`, `--hybrid` | гибридный поиск (по умолчанию) |
-| `-n`, `--top N` | число результатов |
-| `-g`, `--glob PATTERN` | маска пути, повторяемая; `!` в начале исключает |
-| `--lang LANG` | ограничить языком |
-| `--threshold X` | минимальная оценка |
-| `-C`, `--context N` | строк контекста вокруг совпадения |
-| `--files-only` | вывести только уникальные пути |
-| `--json` | вывод JSON lines (общий контракт с инструментом `search`) |
-| `--no-update` | не обновлять индекс перед поиском |
-| `--root DIR` | корень проекта |
+| `-s`, `--semantic` | semantic search only |
+| `-l`, `--lexical` | lexical search only |
+| `-H`, `--hybrid` | hybrid search (default) |
+| `-n`, `--top N` | number of results |
+| `-g`, `--glob PATTERN` | path glob, repeatable; a leading `!` excludes |
+| `--lang LANG` | restrict to a language |
+| `--threshold X` | minimum score |
+| `-C`, `--context N` | lines of context around a match |
+| `--files-only` | print unique paths only |
+| `--json` | JSON lines output (same contract as the `search` tool) |
+| `--no-update` | do not update the index before searching |
+| `--root DIR` | project root |
 | `--color WHEN` | `auto`, `always`, `never` |
-| `--provider NAME` | провайдер эмбеддингов |
-| `--model ID` | модель эмбеддингов |
-| `--allow-remote` | разрешить отправку кода внешнему провайдеру |
-| `-h`, `--help` | справка |
-| `-V`, `--version` | версия |
+| `--provider NAME` | embedding provider |
+| `--model ID` | embedding model |
+| `--allow-remote` | allow sending code to an external provider |
+| `-h`, `--help` | help |
+| `-V`, `--version` | version |
 
 ## similar
 
@@ -44,7 +44,7 @@ code-embed similar <PATH>:<START>-<END> [OPTIONS]
 code-embed similar - [--lang ts] [OPTIONS]
 ```
 
-Первая форма ищет код, похожий на диапазон строк (1-based, включительно); вторая читает фрагмент из stdin, `--lang` задаёт язык. Принимает общие опции поиска.
+The first form finds code similar to a line range (1-based, inclusive); the second reads a fragment from stdin, with `--lang` setting its language. Accepts the common search options.
 
 ## index
 
@@ -52,23 +52,23 @@ code-embed similar - [--lang ts] [OPTIONS]
 code-embed index [--watch] [--full]
 ```
 
-Строит или обновляет индекс (лексическая фаза, затем векторная). `--watch` продолжает следить за изменениями, `--full` пересобирает с нуля. Прогресс выводится в stderr.
+Builds or updates the index (lexical phase, then vector phase). `--watch` keeps watching for changes, `--full` rebuilds from scratch. Progress goes to stderr.
 
 ## status
 
-`code-embed status` показывает состояние индекса и движка проекта.
+`code-embed status` shows the state of the project's index and engine.
 
 ## daemon
 
-`code-embed daemon [--detach]` запускает долгоживущий движок с сокетом и watcher для проекта; `--detach` отвязывает процесс от терминала.
+`code-embed daemon [--detach]` starts a long-lived engine with a socket and a file watcher for the project; `--detach` detaches the process from the terminal.
 
 ## stop
 
-`code-embed stop` останавливает демон проекта.
+`code-embed stop` stops the project's daemon.
 
 ## mcp
 
-`code-embed mcp [--root DIR]` запускает stdio MCP-сервер с инструментами `search` и `find_similar`. См. [agents.md](agents.md).
+`code-embed mcp [--root DIR]` starts a stdio MCP server with the `search` and `find_similar` tools. See [agents.md](agents.md).
 
 ## model
 
@@ -77,7 +77,7 @@ code-embed model install [--from FILE]
 code-embed model list
 ```
 
-`model install` без `--from` скачивает выбранную (или модель по умолчанию) по манифесту с проверкой sha256; с `--from` устанавливает из оффлайн-архива. `model list` печатает каталог и статус установки.
+`model install` without `--from` downloads the selected (or default) model from the manifest and verifies sha256; with `--from` it installs from an offline archive. `model list` prints the catalog and installation status.
 
 ## provider
 
@@ -87,24 +87,24 @@ code-embed provider add [--kind openai --base-url URL --model NAME --api-key-env
 code-embed provider test <name>
 ```
 
-`add` в TTY задаёт вопросы интерактивно; без TTY параметры берутся из флагов `--kind`, `--base-url`, `--model`, `--api-key-env` (дополнительно `--dimensions`, `--max-input-tokens`, `--query-prefix`, `--doc-prefix`). `list` показывает, какие провайдеры внешние. `test` проверяет доступность провайдера. Конфигурация: [configuration.md](configuration.md).
+In a TTY, `add` asks questions interactively; without a TTY it reads `--kind`, `--base-url`, `--model`, `--api-key-env` (plus `--dimensions`, `--max-input-tokens`, `--query-prefix`, `--doc-prefix`). `list` shows which providers are external. `test` checks that a provider is reachable. Configuration: [configuration.md](configuration.md).
 
 ## gc
 
-`code-embed gc` удаляет из глобального кеша эмбеддингов записи, которые больше не нужны индексам.
+`code-embed gc` removes entries from the global embedding cache that no index needs anymore.
 
 ## clean
 
-`code-embed clean [--yes] [--root DIR]` удаляет индекс проекта. Без `--yes` в TTY спрашивает подтверждение, без TTY отказывается (код 2). Если для проекта запущен демон, сначала выполните `code-embed stop`.
+`code-embed clean [--yes] [--root DIR]` deletes the project's index. Without `--yes` it asks for confirmation in a TTY and refuses without one (exit code 2). If a daemon is running for the project, run `code-embed stop` first.
 
 ## export
 
-`code-embed export [--out FILE]` сохраняет индекс проекта в архив для переноса.
+`code-embed export [--out FILE]` saves the project's index to an archive for transfer.
 
 ## import
 
-`code-embed import <FILE>` загружает индекс из архива, созданного `export`.
+`code-embed import <FILE>` loads an index from an archive created by `export`.
 
-## Внешние провайдеры и подтверждение
+## External providers and consent
 
-При первой отправке кода внешнему провайдеру CLI спрашивает подтверждение (интерактивно в TTY). Без TTY команда завершится кодом 2 с подсказкой; передайте `--allow-remote`, чтобы разрешить. Подтверждение сохраняется в `consents.toml`.
+The first time code is about to be sent to an external provider, the CLI asks for consent (interactively in a TTY). Without a TTY the command exits with code 2 and a hint; pass `--allow-remote` to allow it. Consent is stored in `consents.toml`.

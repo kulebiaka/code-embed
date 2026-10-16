@@ -11,6 +11,7 @@
     "test": "vitest run",
     "build": "pnpm -r build",
     "check:docs": "node scripts/check-docs.mjs",
+    "release:version": "node scripts/version.mjs",
     "eval": "pnpm --filter @code-embed/eval run eval",
     "stage0": "pnpm --filter @code-embed/eval run stage0"
   },

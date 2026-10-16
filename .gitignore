@@ -8,3 +8,5 @@ dist/
 eval/.repos/
 eval/reports/
 coverage/
+packages/engine/README.md
+packages/engine/LICENSE
