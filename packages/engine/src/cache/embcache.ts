@@ -119,6 +119,7 @@ export function openEmbCache(path: string): EmbCache {
     get(modelId, hashes) {
       const out = new Map<string, Float32Array>();
       const now = Date.now();
+      let touchSkipped = false;
       for (let i = 0; i < hashes.length; i += BATCH) {
         const part = hashes.slice(i, i + BATCH);
         const ph = part.map(() => "?").join(",");
@@ -126,11 +127,20 @@ export function openEmbCache(path: string): EmbCache {
           .prepare(`SELECT chunk_hash, vector FROM emb WHERE model_id = ? AND chunk_hash IN (${ph})`)
           .all(modelId, ...part) as { chunk_hash: string; vector: Uint8Array }[];
         for (const r of rows) out.set(r.chunk_hash, fromBlob(r.vector));
-        if (rows.length > 0) {
+        if (rows.length > 0 && !touchSkipped) {
           const found = rows.map((r) => r.chunk_hash);
-          db.prepare(
-            `UPDATE emb SET last_used = ? WHERE model_id = ? AND chunk_hash IN (${found.map(() => "?").join(",")})`,
-          ).run(now, modelId, ...found);
+          // last_used only feeds gc; a search-path read must never wait for another process's write lock.
+          db.exec("PRAGMA busy_timeout = 0");
+          try {
+            db.prepare(
+              `UPDATE emb SET last_used = ? WHERE model_id = ? AND chunk_hash IN (${found.map(() => "?").join(",")})`,
+            ).run(now, modelId, ...found);
+          } catch (e) {
+            if (!isBusy(e)) throw e;
+            touchSkipped = true;
+          } finally {
+            db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+          }
         }
       }
       return out;

@@ -2,6 +2,7 @@ import { fork, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -159,5 +160,49 @@ describe("concurrent processes", () => {
     } finally {
       other.close();
     }
+  });
+
+  describe("last_used under a held write lock", () => {
+    const lastUsed = (path: string) => {
+      const db = new DatabaseSync(path);
+      try {
+        const row = db.prepare("SELECT MIN(last_used) AS t FROM emb").get() as { t: number | bigint };
+        return Number(row.t);
+      } finally {
+        db.close();
+      }
+    };
+
+    it("get does not wait for the lock, put still does, and the next get refreshes last_used", { timeout: 30_000 }, async () => {
+      const path = join(dir, "touch", "emb.db");
+      const other = openEmbCache(path);
+      try {
+        const hashes = Array.from({ length: 20 }, (_, i) => h(i));
+        other.put("m", hashes.map((chunkHash) => ({ chunkHash, vector: new Float32Array([1, 2]) })));
+        const before = lastUsed(path);
+
+        const holder = fork(FIXTURE, [path, "hold", "0", "0"], { execArgv: tsxExecArgv() });
+        children.push(holder);
+        const released = new Promise<void>((resolve) => holder.once("exit", () => resolve()));
+        await new Promise((resolve, reject) => {
+          holder.once("message", resolve);
+          holder.once("error", reject);
+        });
+
+        const t0 = performance.now();
+        const got = other.get("m", hashes);
+        expect(performance.now() - t0).toBeLessThan(100);
+        expect(got.size).toBe(hashes.length);
+
+        other.put("m", [{ chunkHash: h(99), vector: new Float32Array([3]) }]);
+        await released;
+        expect(lastUsed(path)).toBe(before);
+
+        other.get("m", hashes);
+        expect(lastUsed(path)).toBeGreaterThan(before);
+      } finally {
+        other.close();
+      }
+    });
   });
 });
