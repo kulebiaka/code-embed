@@ -39,20 +39,46 @@ export interface CheckVerdict {
   detail: string;
 }
 
-export interface VerdictInput {
-  model: string;
-  minEmbedded: number;
+export interface EngineObs {
   chunks: number;
   embedded: number;
   exitedBeforeShutdown: { code: number | null; signal: string | null } | null;
   errors: string[];
-  rss: { supported: boolean; peakTotalKb: number; peakRootKb: number; peakChildKb: number; rootPeakPhase: Phase | null };
+  rss: { peakTreeKb: number; peakEngineKb: number; peakChildKb: number; peakPhase: Phase | null };
   status: number[];
   lexical: Latency[];
   hybrid: Latency[];
   similar: Latency[];
   nr07Ms: number | null;
   shutdown: { exitMs: number | null; leftover: number };
+}
+
+export interface HostObs {
+  firstPid: number;
+  pid: number;
+  peakTreeKb: number;
+  shutdown: { exitMs: number | null; leftover: number };
+}
+
+export interface MachineInput {
+  model: string;
+  minEmbedded: number;
+  rssSupported: boolean;
+  engines: EngineObs[];
+  host: HostObs | null;
+}
+
+export interface RssSplit {
+  host: TreeRss | null;
+  engines: TreeRss[];
+}
+
+export interface RssPeaks {
+  hostKb: number;
+  hostPids: number[];
+  hostFirstPid: number | null;
+  hostPid: number | null;
+  engines: { treeKb: number; engineKb: number; childKb: number; phase: Phase | null }[];
 }
 
 export function percentile(values: number[], p: number): number {
@@ -98,6 +124,48 @@ export function treeRss(entries: PsEntry[], rootPid: number): TreeRss {
   const rootKb = byPid.get(rootPid)?.rssKb ?? 0;
   const childrenKb = kids.reduce((s, pid) => s + (byPid.get(pid)?.rssKb ?? 0), 0);
   return { totalKb: rootKb + childrenKb, rootKb, childrenKb, pids: [rootPid, ...kids] };
+}
+
+export function splitRss(entries: PsEntry[], enginePids: number[], hostPid: number | null): RssSplit {
+  const present = hostPid !== null && entries.some((e) => e.pid === hostPid);
+  const host = present ? treeRss(entries, hostPid) : null;
+  const hostSet = new Set(host?.pids ?? []);
+  const byPid = new Map(entries.map((e) => [e.pid, e]));
+  const engines = enginePids.map((pid) => {
+    const tree = treeRss(entries, pid);
+    const pids = tree.pids.filter((p) => !hostSet.has(p));
+    const childrenKb = pids.reduce((sum, p) => (p === pid ? sum : sum + (byPid.get(p)?.rssKb ?? 0)), 0);
+    return { totalKb: tree.rootKb + childrenKb, rootKb: tree.rootKb, childrenKb, pids };
+  });
+  return { host, engines };
+}
+
+export function newPeaks(engines: number): RssPeaks {
+  return {
+    hostKb: 0,
+    hostPids: [],
+    hostFirstPid: null,
+    hostPid: null,
+    engines: Array.from({ length: engines }, () => ({ treeKb: 0, engineKb: 0, childKb: 0, phase: null as Phase | null })),
+  };
+}
+
+export function recordSample(peaks: RssPeaks, split: RssSplit, hostPid: number | null, phases: (Phase | null)[]): void {
+  if (split.host && hostPid !== null) {
+    if (peaks.hostFirstPid === null) peaks.hostFirstPid = hostPid;
+    peaks.hostPid = hostPid;
+    peaks.hostPids = split.host.pids;
+    if (split.host.totalKb > peaks.hostKb) peaks.hostKb = split.host.totalKb;
+  }
+  split.engines.forEach((tree, i) => {
+    const p = peaks.engines[i]!;
+    if (tree.totalKb > p.treeKb) p.treeKb = tree.totalKb;
+    if (tree.rootKb > p.engineKb) {
+      p.engineKb = tree.rootKb;
+      p.phase = phases[i] ?? null;
+    }
+    if (tree.childrenKb > p.childKb) p.childKb = tree.childrenKb;
+  });
 }
 
 export function rssLimitMb(model: string): number {
@@ -146,69 +214,117 @@ function searchCheck(name: string, all: Latency[]): CheckVerdict {
   };
 }
 
-export function evaluate(input: VerdictInput): CheckVerdict[] {
+function engineChecks(e: EngineObs, minEmbedded: number, prefix: string, restart: string | null): CheckVerdict[] {
   const checks: CheckVerdict[] = [];
-
-  const fatal = input.errors.filter((e) => FATAL_ERROR.test(e));
-  const crashDetail = input.exitedBeforeShutdown
-    ? `engine exited before shutdown (code=${input.exitedBeforeShutdown.code}, signal=${input.exitedBeforeShutdown.signal})`
-    : fatal.length > 0
-      ? `fatal errors: ${fatal.slice(0, 3).join(" | ")}`
-      : "no crashes";
+  const fatal = e.errors.filter((x) => FATAL_ERROR.test(x));
+  const problems: string[] = [];
+  if (e.exitedBeforeShutdown)
+    problems.push(`engine exited before shutdown (code=${e.exitedBeforeShutdown.code}, signal=${e.exitedBeforeShutdown.signal})`);
+  else if (fatal.length > 0) problems.push(`fatal errors: ${fatal.slice(0, 3).join(" | ")}`);
+  if (restart) problems.push(restart);
   checks.push({
-    name: "no-crash",
-    status: input.exitedBeforeShutdown || fatal.length > 0 ? "fail" : "pass",
-    detail: crashDetail,
+    name: `${prefix}no-crash`,
+    status: problems.length > 0 ? "fail" : "pass",
+    detail: problems.length > 0 ? problems.join("; ") : "no crashes",
   });
 
-  const need = Math.min(input.minEmbedded, input.chunks);
+  const need = Math.min(minEmbedded, e.chunks);
   checks.push({
-    name: "progress",
-    status: input.embedded >= need && input.chunks > 0 ? "pass" : "fail",
-    detail: `embedded=${input.embedded} chunks=${input.chunks} required>=${need}`,
+    name: `${prefix}progress`,
+    status: e.embedded >= need && e.chunks > 0 ? "pass" : "fail",
+    detail: `embedded=${e.embedded} chunks=${e.chunks} required>=${need}`,
   });
 
-  const limit = rssLimitMb(input.model);
-  if (!input.rss.supported) {
-    checks.push({ name: "rss", status: "skip", detail: "RSS sampling is not supported on this platform" });
-  } else {
-    const total = mb(input.rss.peakTotalKb);
-    checks.push({
-      name: "rss",
-      status: total <= limit ? "pass" : "fail",
-      detail: `peak tree ${total} MB (limit ${limit}); engine ${mb(input.rss.peakRootKb)} MB (peak phase ${input.rss.rootPeakPhase ?? "n/a"}), inference ${mb(input.rss.peakChildKb)} MB`,
-    });
-  }
-
-  const st = latencyStats(input.status);
+  const st = latencyStats(e.status);
   checks.push({
-    name: "status-p95",
+    name: `${prefix}status-p95`,
     status: st.n > 0 && st.p95 <= THRESHOLDS.statusP95Ms ? "pass" : "fail",
     detail: `n=${st.n} p95=${fmt(st.p95)} max=${fmt(st.max)} (limit ${THRESHOLDS.statusP95Ms})`,
   });
 
-  const lx = latencyStats(input.lexical.map((s) => s.ms));
+  const lx = latencyStats(e.lexical.map((s) => s.ms));
   checks.push({
-    name: "lexical-p95",
+    name: `${prefix}lexical-p95`,
     status: lx.n > 0 && lx.p95 <= THRESHOLDS.lexicalP95Ms ? "pass" : "fail",
     detail: `n=${lx.n} p95=${fmt(lx.p95)} max=${fmt(lx.max)} (limit ${THRESHOLDS.lexicalP95Ms})`,
   });
 
   checks.push({
-    name: "nr07",
-    status: input.nr07Ms !== null && input.nr07Ms <= THRESHOLDS.nr07Ms ? "pass" : "fail",
-    detail: input.nr07Ms === null ? "marker did not appear" : `${fmt(input.nr07Ms)} ms (limit ${THRESHOLDS.nr07Ms})`,
+    name: `${prefix}nr07`,
+    status: e.nr07Ms !== null && e.nr07Ms <= THRESHOLDS.nr07Ms ? "pass" : "fail",
+    detail: e.nr07Ms === null ? "marker did not appear" : `${fmt(e.nr07Ms)} ms (limit ${THRESHOLDS.nr07Ms})`,
   });
 
-  checks.push(searchCheck("hybrid-during-indexing", input.hybrid));
-  checks.push(searchCheck("find-similar-during-indexing", input.similar));
+  checks.push(searchCheck(`${prefix}hybrid-during-indexing`, e.hybrid));
+  checks.push(searchCheck(`${prefix}find-similar-during-indexing`, e.similar));
 
-  const { exitMs, leftover } = input.shutdown;
+  const { exitMs, leftover } = e.shutdown;
   checks.push({
-    name: "shutdown",
+    name: `${prefix}shutdown`,
     status: exitMs !== null && exitMs <= THRESHOLDS.shutdownMs && leftover === 0 ? "pass" : "fail",
-    detail: `exit ${exitMs === null ? "timed out" : fmt(exitMs) + " ms"}, leftover children ${leftover}`,
+    detail: `exit ${exitMs === null ? "timed out" : fmt(exitMs) + " ms"}, leftover children ${leftover} (shared host excluded)`,
   });
+  return checks;
+}
+
+export function evaluate(input: MachineInput): CheckVerdict[] {
+  const { engines, host } = input;
+  const n = engines.length;
+  const multi = n > 1;
+  const checks: CheckVerdict[] = [];
+  const restart = host && host.pid !== host.firstPid ? `host restarted: ${host.firstPid} → ${host.pid}` : null;
+
+  if (multi && restart) checks.push({ name: "no-crash", status: "fail", detail: restart });
+  engines.forEach((e, i) => {
+    checks.push(...engineChecks(e, input.minEmbedded, multi ? `p${i + 1}:` : "", multi ? null : restart));
+  });
+
+  const limit = rssLimitMb(input.model);
+  if (!input.rssSupported) {
+    checks.push({ name: "rss", status: "skip", detail: "RSS sampling is not supported on this platform" });
+    checks.push({ name: "rss-host", status: "skip", detail: "RSS sampling is not supported on this platform" });
+  } else {
+    const hostKb = host?.peakTreeKb ?? 0;
+    if (!multi) {
+      const e = engines[0]!;
+      const total = mb(hostKb + e.rss.peakTreeKb);
+      checks.push({
+        name: "rss",
+        status: total <= limit ? "pass" : "fail",
+        detail: `host ${mb(hostKb)} MB + engine tree ${mb(e.rss.peakTreeKb)} MB = ${total} MB (limit ${limit}); engine ${mb(e.rss.peakEngineKb)} MB (peak phase ${e.rss.peakPhase ?? "n/a"}), inference ${mb(e.rss.peakChildKb)} MB`,
+      });
+    } else {
+      const sum = engines.reduce((s, e) => s + e.rss.peakTreeKb, 0);
+      const maxEngine = Math.max(...engines.map((e) => e.rss.peakEngineKb));
+      const lhs = mb(hostKb + sum);
+      const rhs = limit + n * mb(maxEngine);
+      checks.push({
+        name: "rss",
+        status: lhs <= rhs ? "pass" : "fail",
+        detail: `host ${mb(hostKb)} MB + engines [${engines.map((e) => mb(e.rss.peakTreeKb)).join(" + ")}] MB = ${lhs} MB (limit ${limit} + ${n} x max engine ${mb(maxEngine)} MB = ${rhs})`,
+      });
+    }
+    checks.push(
+      host
+        ? {
+            name: "rss-host",
+            status: mb(host.peakTreeKb) <= limit ? "pass" : "fail",
+            detail: `host tree ${mb(host.peakTreeKb)} MB (limit ${limit})`,
+          }
+        : { name: "rss-host", status: "skip", detail: "no shared host observed" },
+    );
+  }
+
+  if (host) {
+    const { exitMs, leftover } = host.shutdown;
+    checks.push({
+      name: "shutdown-host",
+      status: exitMs !== null && exitMs <= THRESHOLDS.shutdownMs && leftover === 0 ? "pass" : "fail",
+      detail: `host and inference exit after SIGTERM ${exitMs === null ? "timed out" : fmt(exitMs) + " ms"}, still alive ${leftover}`,
+    });
+  } else {
+    checks.push({ name: "shutdown-host", status: "skip", detail: "no shared host observed" });
+  }
 
   return checks;
 }

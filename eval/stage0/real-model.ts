@@ -1,6 +1,7 @@
 import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   createWriteStream,
+  type WriteStream,
   appendFileSync,
   existsSync,
   mkdirSync,
@@ -18,18 +19,25 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import { PROTOCOL_VERSION, createEngineProxy, type EngineApi, type IndexStatus } from "@code-embed/protocol";
+import { isProcessAlive, readLockPid } from "../../packages/engine/src/core/lock";
 import { modelsDir } from "../../packages/engine/src/core/paths";
 import {
   THRESHOLDS,
   allPassed,
   evaluate,
   latencyStats,
+  newPeaks,
   parsePs,
+  recordSample,
+  rssLimitMb,
   searchShares,
-  treeRss,
+  splitRss,
   type CheckVerdict,
+  type EngineObs,
+  type HostObs,
   type Latency,
   type Phase,
+  type RssPeaks,
 } from "./real-model-report";
 import { minVersionFromRange } from "./report";
 import { STRESS_MARKERS, copyRepoFixture, createStressFixture } from "./stress-fixture";
@@ -46,6 +54,7 @@ const { values: args } = parseArgs({
     engine: { type: "string" },
     repo: { type: "string" },
     minutes: { type: "string", default: "5" },
+    projects: { type: "string", default: "1" },
     "min-embedded": { type: "string", default: String(THRESHOLDS.defaultMinEmbedded) },
   },
 });
@@ -53,6 +62,11 @@ const { values: args } = parseArgs({
 const models = args.model!.split(",").map((s) => s.trim()).filter(Boolean);
 const minutes = Number(args.minutes);
 const minEmbedded = Number(args["min-embedded"]);
+const projects = Number(args.projects);
+if (!Number.isInteger(projects) || projects < 1) {
+  console.error(`--projects must be an integer >= 1, got "${args.projects}"`);
+  process.exit(2);
+}
 const reportDir = resolve(process.env.REAL_MODEL_REPORT_DIR ?? join(repoRoot, "eval/reports/real-model"));
 const sharedModels = process.env.CODE_EMBED_MODELS_DIR ? resolve(process.env.CODE_EMBED_MODELS_DIR) : modelsDir();
 const vscodeCache = process.env.VSCODE_TEST_CACHE ?? join(tmpdir(), "code-embed-vscode-test");
@@ -142,39 +156,69 @@ interface ComboResult {
   summary: string;
 }
 
-async function runCombo(model: string, versionArg: string, cli: string): Promise<ComboResult> {
-  const version = versionArg === "min" ? minVersionFromRange(
-    (JSON.parse(readFileSync(extensionPkg, "utf8")) as { engines: { vscode: string } }).engines.vscode,
-  ) : versionArg;
-  const label = `${model} @ VS Code ${version}`;
-  console.log(`\n=== ${label} ===`);
+type Conn = ReturnType<typeof jsonrpc.createMessageConnection>;
 
-  const probe = async (exe: string) =>
-    (
-      await run(exe, ["-e", "console.log(process.versions.electron + ' / node ' + process.versions.node)"], {
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-      })
-    ).stdout.trim();
-  let exe = extensionHostExe(await downloadAndUnzipVSCode({ version, cachePath: vscodeCache }));
-  let electron: string;
+interface Engine {
+  index: number;
+  root: string;
+  fixtureKind: string;
+  stressFiles: string[];
+  logPath: string;
+  logStream: WriteStream;
+  child: ChildProcess;
+  pid: number;
+  conn: Conn;
+  api: EngineApi;
+  shuttingDown: boolean;
+  exitInfo: { code: number | null; signal: string | null } | null;
+  exitedAt: number | null;
+  exitedEarly: Promise<never>;
+  errors: string[];
+  progressPhases: string[];
+  latest: IndexStatus | null;
+  finalStatus: IndexStatus | null;
+  statusMs: number[];
+  lexical: Latency[];
+  hybrid: Latency[];
+  similar: Latency[];
+  timeline: { t: number; embedded: number; chunks: number; phase: string; rssMb: number }[];
+  t0: number;
+  wallEnd: number;
+  initMs: number;
+  nr07Ms: number | null;
+  stressIndexed: CheckVerdict | null;
+  hardError: string | null;
+  exitMs: number | null;
+}
+
+interface Machine {
+  exe: string;
+  cli: string;
+  cacheDir: string;
+  configDir: string;
+  tmp: string;
+  multi: boolean;
+  stem: string;
+  peaks: RssPeaks;
+}
+
+function findHostPid(cacheDir: string): number | null {
+  let names: string[];
   try {
-    electron = await probe(exe);
+    names = readdirSync(cacheDir).filter((n) => /^embed-host-.*\.lock$/.test(n)).sort();
   } catch {
-    const install = /^(.*[\\/]vscode-[^\\/]+)[\\/]/.exec(exe)?.[1];
-    if (!install || !install.startsWith(vscodeCache)) throw new Error(`cannot run ${exe}`);
-    console.warn(`VS Code install is unusable (broken code signature?), re-downloading: ${install}`);
-    rmSync(install, { recursive: true, force: true });
-    exe = extensionHostExe(await downloadAndUnzipVSCode({ version, cachePath: vscodeCache }));
-    electron = await probe(exe);
+    return null;
   }
+  for (const name of names) {
+    const pid = readLockPid(cacheDir, name);
+    if (pid !== null && isProcessAlive(pid)) return pid;
+  }
+  return null;
+}
 
-  const tmp = mkdtempSync(join(tmpdir(), "real-model-"));
-  const root = join(tmp, "project");
-  const cacheDir = join(tmp, "cache");
-  const configDir = join(tmp, "config");
-  for (const d of [root, cacheDir, configDir, sharedModels]) mkdirSync(d, { recursive: true });
-  symlinkSync(sharedModels, join(cacheDir, "models"), "junction");
-
+function startEngine(index: number, m: Machine): Engine {
+  const root = join(m.tmp, m.multi ? `project-${index + 1}` : "project");
+  mkdirSync(root, { recursive: true });
   let fixtureKind = "stress";
   let stressFiles: string[] = [];
   if (args.repo) {
@@ -188,74 +232,83 @@ async function runCombo(model: string, versionArg: string, cli: string): Promise
   git("-c", "user.email=a@b.c", "-c", "user.name=smoke", "add", "-A");
   git("-c", "user.email=a@b.c", "-c", "user.name=smoke", "commit", "-qm", "fixture");
 
-  mkdirSync(reportDir, { recursive: true });
-  const stem = `real-model-${model}-${version}-${process.platform}-${process.arch}`;
-  const logPath = join(reportDir, `${stem}.engine.log`);
+  const logPath = join(reportDir, m.multi ? `${m.stem}.engine-${index + 1}.log` : `${m.stem}.engine.log`);
   const logStream = createWriteStream(logPath);
-
-  const child: ChildProcess = spawn(exe, [cli, "serve"], {
+  const child = spawn(m.exe, [m.cli, "serve"], {
     cwd: root,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", CODE_EMBED_CACHE_DIR: cacheDir, CODE_EMBED_CONFIG_DIR: configDir },
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", CODE_EMBED_CACHE_DIR: m.cacheDir, CODE_EMBED_CONFIG_DIR: m.configDir },
     stdio: ["pipe", "pipe", "pipe"],
   });
   child.stderr!.pipe(logStream);
-  const enginePid = child.pid!;
 
-  let shuttingDown = false;
-  let exitInfo: { code: number | null; signal: string | null } | null = null;
-  let exitedAt: number | null = null;
+  const e = {
+    index,
+    root,
+    fixtureKind,
+    stressFiles,
+    logPath,
+    logStream,
+    child,
+    pid: child.pid!,
+    shuttingDown: false,
+    exitInfo: null,
+    exitedAt: null,
+    errors: [],
+    progressPhases: [],
+    latest: null,
+    finalStatus: null,
+    statusMs: [],
+    lexical: [],
+    hybrid: [],
+    similar: [],
+    timeline: [],
+    t0: now(),
+    wallEnd: 0,
+    initMs: 0,
+    nr07Ms: null,
+    stressIndexed: null,
+    hardError: null,
+    exitMs: null,
+  } as unknown as Engine;
+  e.wallEnd = e.t0;
+
   let onExit!: () => void;
-  const exitedEarly = new Promise<never>((_, reject) => {
+  e.exitedEarly = new Promise<never>((_, reject) => {
     onExit = () => reject(new Error("engine exited before the request completed"));
   });
-  exitedEarly.catch(() => {});
+  e.exitedEarly.catch(() => {});
   child.on("exit", (code, signal) => {
-    exitedAt = now();
-    if (!shuttingDown) onExit();
-    if (!shuttingDown) exitInfo = { code, signal };
+    e.exitedAt = now();
+    if (!e.shuttingDown) onExit();
+    if (!e.shuttingDown) e.exitInfo = { code, signal };
   });
-  child.on("error", (e) => {
-    if (!shuttingDown) exitInfo = { code: null, signal: `spawn error: ${e.message}` };
+  child.on("error", (err) => {
+    if (!e.shuttingDown) e.exitInfo = { code: null, signal: `spawn error: ${err.message}` };
   });
 
-  const conn = jsonrpc.createMessageConnection(
+  e.conn = jsonrpc.createMessageConnection(
     new jsonrpc.StreamMessageReader(child.stdout!),
     new jsonrpc.StreamMessageWriter(child.stdin!),
   );
-  conn.onError(() => {});
-  conn.onClose(() => {});
-  conn.listen();
-  const api: EngineApi = createEngineProxy(conn);
-
-  const errors: string[] = [];
-  const progressPhases: string[] = [];
-  api.onIndexError((e) => errors.push(e.message));
-  api.onProgress((p) => {
-    if (progressPhases[progressPhases.length - 1] !== p.phase) progressPhases.push(p.phase);
+  e.conn.onError(() => {});
+  e.conn.onClose(() => {});
+  e.conn.listen();
+  e.api = createEngineProxy(e.conn);
+  e.api.onIndexError((err) => e.errors.push(err.message));
+  e.api.onProgress((p) => {
+    if (e.progressPhases[e.progressPhases.length - 1] !== p.phase) e.progressPhases.push(p.phase);
   });
+  return e;
+}
 
-  let latest = null as IndexStatus | null;
+async function observeEngine(e: Engine, model: string, m: Machine): Promise<void> {
+  const { api, root, errors, statusMs, lexical, hybrid, similar } = e;
   const noteStatus = (s: IndexStatus) => {
-    latest = s;
+    e.latest = s;
     if (s.lastError && !errors.includes(s.lastError)) errors.push(s.lastError);
   };
-
-  const statusMs: number[] = [];
-  const lexical: Latency[] = [];
-  const hybrid: Latency[] = [];
-  const similar: Latency[] = [];
-  const rss = { supported: process.platform !== "win32", peakTotalKb: 0, peakRootKb: 0, peakChildKb: 0, rootPeakPhase: null as Phase | null };
-  let lastPids: number[] = [enginePid];
-  const timeline: { t: number; embedded: number; chunks: number; phase: string; rssMb: number }[] = [];
-
-  const t0 = now();
-  let windowStart = t0;
-  let initMs = 0;
-  let wallEnd = t0;
-  let nr07Ms: number | null = null;
-  let stressIndexed: CheckVerdict | null = null;
-  let hardError: string | null = null;
-  let finalStatus: IndexStatus | null = null;
+  e.t0 = now();
+  let windowStart = e.t0;
 
   try {
     const init = await Promise.race([
@@ -265,49 +318,28 @@ async function runCombo(model: string, versionArg: string, cli: string): Promise
         protocolVersion: PROTOCOL_VERSION,
         settings: { model: { id: model } },
       }),
-      exitedEarly,
+      e.exitedEarly,
     ]);
-    initMs = now() - t0;
+    e.initMs = now() - e.t0;
     noteStatus(init.index);
 
     let firstEmbeddedAt: number | null = null;
     let nr07Started = false;
-    let sampling = true;
     const inflight = new Set<string>();
     const guarded = (key: string, fn: () => Promise<void>) => {
       if (inflight.has(key)) return;
       inflight.add(key);
-      void fn().catch((e) => errors.push(`${key} probe failed: ${e instanceof Error ? e.message : e}`)).finally(() => inflight.delete(key));
+      void fn().catch((err) => errors.push(`${key} probe failed: ${err instanceof Error ? err.message : err}`)).finally(() => inflight.delete(key));
     };
     const timed = async <T extends { partial?: boolean; partialReason?: string }>(
       list: Latency[],
       call: () => Promise<T>,
     ) => {
-      const indexing = latest !== null && latest.embedded < latest.chunks;
+      const indexing = e.latest !== null && e.latest.embedded < e.latest.chunks;
       const s = now();
       const res = await call();
       list.push({ ms: now() - s, indexing, partial: res.partial, partialReason: res.partialReason });
     };
-
-    const rssLoop = async () => {
-      if (!rss.supported) return;
-      while (sampling) {
-        try {
-          const tree = treeRss(await psSnapshot(), enginePid);
-          lastPids = tree.pids;
-          if (tree.totalKb > rss.peakTotalKb) rss.peakTotalKb = tree.totalKb;
-          if (tree.rootKb > rss.peakRootKb) {
-            rss.peakRootKb = tree.rootKb;
-            rss.rootPeakPhase = toPhase(latest?.phase);
-          }
-          if (tree.childrenKb > rss.peakChildKb) rss.peakChildKb = tree.childrenKb;
-        } catch {
-          // ps may fail transiently
-        }
-        await sleep(250);
-      }
-    };
-    const rssDone = rssLoop();
 
     const nr07File = firstTsFile(root);
     const runNr07 = async () => {
@@ -318,18 +350,17 @@ async function runCombo(model: string, versionArg: string, cli: string): Promise
       while (now() - s < 5000) {
         const res = await api.search({ query: ident, mode: "lexical", top: 5 });
         if (res.results.length > 0) {
-          nr07Ms = now() - s;
+          e.nr07Ms = now() - s;
           return;
         }
         await sleep(50);
       }
     };
 
-    const counts = { status: 0, lexical: 0, hybrid: 0, similar: 0 };
     for (let tick = 0; ; tick++) {
       await sleep(250);
-      if (exitInfo) break;
-      const st = latest;
+      if (e.exitInfo) break;
+      const st = e.latest;
       if (st?.phase === "model-download") windowStart = now();
       if (now() - windowStart > minutes * 60_000) break;
       const sec = tick / 4;
@@ -340,7 +371,6 @@ async function runCombo(model: string, versionArg: string, cli: string): Promise
           const res = await api.status();
           statusMs.push(now() - s);
           noteStatus(res);
-          counts.status++;
         });
       }
       if (tick % 8 === 0) guarded("lexical", () => timed(lexical, () => api.search({ query: "function", mode: "lexical", top: 10 })));
@@ -366,140 +396,297 @@ async function runCombo(model: string, versionArg: string, cli: string): Promise
         guarded("nr07", runNr07);
       }
       if (tick % 4 === 0 && st) {
-        timeline.push({ t: Math.round(sec), embedded: st.embedded, chunks: st.chunks, phase: st.phase, rssMb: Math.round(rss.peakTotalKb / 1024) });
+        const peak = m.peaks.engines[e.index]!;
+        e.timeline.push({
+          t: Math.round(sec),
+          embedded: st.embedded,
+          chunks: st.chunks,
+          phase: st.phase,
+          rssMb: Math.round((m.peaks.hostKb + peak.treeKb) / 1024),
+        });
       }
       if (st && st.phase === "idle" && st.chunks > 0 && st.embedded >= st.chunks && statusMs.length > 1) {
         await sleep(1100);
-        const again = latest as IndexStatus;
+        const again = e.latest as IndexStatus;
         if (again.phase === "idle" && again.embedded >= again.chunks) break;
       }
     }
 
-    wallEnd = now();
-    if (!exitInfo) {
+    e.wallEnd = now();
+    if (!e.exitInfo) {
       const waitStart = now();
       while (inflight.size > 0 && now() - waitStart < 10_000) await sleep(100);
       if (!nr07Started) {
         nr07Started = true;
-        await runNr07().catch((e) => errors.push(`nr07 probe failed: ${e instanceof Error ? e.message : e}`));
+        await runNr07().catch((err) => errors.push(`nr07 probe failed: ${err instanceof Error ? err.message : err}`));
       }
-      finalStatus = await api.status().catch(() => latest);
-      if (finalStatus) noteStatus(finalStatus);
+      e.finalStatus = await api.status().catch(() => e.latest);
+      if (e.finalStatus) noteStatus(e.finalStatus);
 
-      if (stressFiles.length > 0) {
+      if (e.stressFiles.length > 0) {
         const missing: string[] = [];
         for (const marker of STRESS_MARKERS) {
           const res = await api.search({ query: marker, mode: "lexical", top: 10 });
           if (!res.results.some((r) => r.path.startsWith("stress/"))) missing.push(marker);
         }
-        stressIndexed = {
+        e.stressIndexed = {
           name: "stress-indexed",
           status: missing.length === 0 ? "pass" : "fail",
-          detail: missing.length === 0 ? `${stressFiles.length} stress files found by lexical search` : `not indexed: ${missing.join(", ")}`,
+          detail: missing.length === 0 ? `${e.stressFiles.length} stress files found by lexical search` : `not indexed: ${missing.join(", ")}`,
         };
       }
     }
-    sampling = false;
-    await rssDone;
-  } catch (e) {
-    hardError = e instanceof Error ? e.message : String(e);
-    errors.push(`harness: ${hardError}`);
+  } catch (err) {
+    e.hardError = err instanceof Error ? err.message : String(err);
+    errors.push(`harness: ${e.hardError}`);
+    e.wallEnd = now();
   }
+}
 
-  const snapshot = rss.supported ? await psSnapshot().catch(() => []) : [];
-  const kids = rss.supported ? treeRss(snapshot, enginePid).pids.filter((p) => p !== enginePid) : lastPids.filter((p) => p !== enginePid);
-  shuttingDown = true;
-  const shutdownStart = now();
-  let exitMs: number | null = null;
-  if (exitedAt === null) {
-    await Promise.race([api.shutdown().catch(() => {}), sleep(5000)]);
-    while (exitedAt === null && now() - shutdownStart < THRESHOLDS.shutdownMs) await sleep(50);
+async function shutdownEngine(e: Engine): Promise<void> {
+  e.shuttingDown = true;
+  const start = now();
+  if (e.exitedAt === null) {
+    await Promise.race([e.api.shutdown().catch(() => {}), sleep(5000)]);
+    while (e.exitedAt === null && now() - start < THRESHOLDS.shutdownMs) await sleep(50);
   }
-  if (exitedAt !== null) exitMs = (exitedAt as number) - shutdownStart;
-  else child.kill("SIGKILL");
-  await sleep(1500);
-  const leftoverPids = kids.filter(alive);
-  for (const pid of leftoverPids) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      // already gone
-    }
-  }
-  conn.dispose();
-  logStream.end();
+  if (e.exitedAt !== null) e.exitMs = e.exitedAt - start;
+  else e.child.kill("SIGKILL");
+}
 
-  const status = (finalStatus ?? latest) as IndexStatus | null;
-  const checks = evaluate({
-    model,
-    minEmbedded,
-    chunks: status?.chunks ?? 0,
-    embedded: status?.embedded ?? 0,
-    exitedBeforeShutdown: exitInfo,
-    errors,
-    rss,
-    status: statusMs,
-    lexical,
-    hybrid,
-    similar,
-    nr07Ms,
-    shutdown: { exitMs, leftover: leftoverPids.length },
-  });
-  if (stressIndexed) checks.push(stressIndexed);
-  if (hardError) checks.push({ name: "harness", status: "fail", detail: hardError });
-
-  let indexDbBytes: number | null = null;
+function kill(pid: number, signal: NodeJS.Signals): void {
   try {
-    if (status) indexDbBytes = statSync(join(status.indexDir, "index.db")).size;
+    process.kill(pid, signal);
   } catch {
-    indexDbBytes = null;
+    // already gone
   }
-  const seconds = Math.max(1, (wallEnd - t0) / 1000);
-  const ok = allPassed(checks);
-  const report = {
-    model,
-    vscode: version,
-    electron,
-    platform,
-    engine: cli,
-    executable: exe,
-    fixture: { kind: fixtureKind, files: status?.files ?? 0, chunks: status?.chunks ?? 0, stressFiles, indexDbBytes },
-    embedded: status?.embedded ?? 0,
-    phase: status?.phase ?? null,
-    initializeMs: Math.round(initMs),
-    observedSeconds: Math.round(seconds),
-    chunksPerSec: Number(((status?.embedded ?? 0) / seconds).toFixed(2)),
-    rssMb: {
-      supported: rss.supported,
-      peakTree: Math.round(rss.peakTotalKb / 1024),
-      peakEngine: Math.round(rss.peakRootKb / 1024),
-      peakInference: Math.round(rss.peakChildKb / 1024),
-      enginePeakPhase: rss.rootPeakPhase,
-    },
-    latency: {
-      status: latencyStats(statusMs),
-      lexical: latencyStats(lexical.map((s) => s.ms)),
-      hybridDuringIndexing: { ...latencyStats(hybrid.filter((s) => s.indexing).map((s) => s.ms)), ...searchShares(hybrid.filter((s) => s.indexing)) },
-      findSimilarDuringIndexing: { ...latencyStats(similar.filter((s) => s.indexing).map((s) => s.ms)), ...searchShares(similar.filter((s) => s.indexing)) },
-    },
-    nr07Ms,
-    phases: progressPhases,
-    errors,
-    exitedBeforeShutdown: exitInfo,
-    shutdown: { exitMs, leftover: leftoverPids.length },
-    samples: { hybrid, similar, lexical: lexical.length },
-    timeline,
-    checks,
-    ok,
-    engineLog: logPath,
+}
+
+async function runCombo(model: string, versionArg: string, cli: string): Promise<ComboResult> {
+  const version = versionArg === "min" ? minVersionFromRange(
+    (JSON.parse(readFileSync(extensionPkg, "utf8")) as { engines: { vscode: string } }).engines.vscode,
+  ) : versionArg;
+  const label = `${model} @ VS Code ${version}${projects > 1 ? ` x${projects} projects` : ""}`;
+  console.log(`\n=== ${label} ===`);
+
+  const probe = async (exe: string) =>
+    (
+      await run(exe, ["-e", "console.log(process.versions.electron + ' / node ' + process.versions.node)"], {
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      })
+    ).stdout.trim();
+  let exe = extensionHostExe(await downloadAndUnzipVSCode({ version, cachePath: vscodeCache }));
+  let electron: string;
+  try {
+    electron = await probe(exe);
+  } catch {
+    const install = /^(.*[\\/]vscode-[^\\/]+)[\\/]/.exec(exe)?.[1];
+    if (!install || !install.startsWith(vscodeCache)) throw new Error(`cannot run ${exe}`);
+    console.warn(`VS Code install is unusable (broken code signature?), re-downloading: ${install}`);
+    rmSync(install, { recursive: true, force: true });
+    exe = extensionHostExe(await downloadAndUnzipVSCode({ version, cachePath: vscodeCache }));
+    electron = await probe(exe);
+  }
+
+  const tmp = mkdtempSync(join(tmpdir(), "real-model-"));
+  const cacheDir = join(tmp, "cache");
+  const configDir = join(tmp, "config");
+  for (const d of [cacheDir, configDir, sharedModels]) mkdirSync(d, { recursive: true });
+  symlinkSync(sharedModels, join(cacheDir, "models"), "junction");
+
+  mkdirSync(reportDir, { recursive: true });
+  const multi = projects > 1;
+  const stem = `real-model-${model}-${version}-${process.platform}-${process.arch}${multi ? `-p${projects}` : ""}`;
+  const rssSupported = process.platform !== "win32";
+  const m: Machine = { exe, cli, cacheDir, configDir, tmp, multi, stem, peaks: newPeaks(projects) };
+
+  const engines = Array.from({ length: projects }, (_, i) => startEngine(i, m));
+  const enginePids = engines.map((e) => e.pid);
+
+  let sampling = rssSupported;
+  const rssLoop = async () => {
+    while (sampling) {
+      try {
+        const hostPid = findHostPid(cacheDir);
+        const split = splitRss(await psSnapshot(), enginePids, hostPid);
+        recordSample(m.peaks, split, hostPid, engines.map((e) => (e.latest ? toPhase(e.latest.phase) : null)));
+      } catch {
+        // ps may fail transiently
+      }
+      await sleep(250);
+    }
   };
+  const rssDone = rssLoop();
+
+  await Promise.all(engines.map((e) => observeEngine(e, model, m)));
+  sampling = false;
+  await rssDone;
+
+  const hostPidNow = rssSupported ? findHostPid(cacheDir) : null;
+  const snapshot = rssSupported ? await psSnapshot().catch(() => []) : [];
+  const split = splitRss(snapshot, enginePids, hostPidNow);
+  const kids = split.engines.map((t, i) => t.pids.filter((p) => p !== engines[i]!.pid));
+
+  await Promise.all(engines.map(shutdownEngine));
+  await sleep(1500);
+  const leftoverPids = kids.map((list) => list.filter(alive));
+  for (const pid of leftoverPids.flat()) kill(pid, "SIGKILL");
+
+  const { peaks } = m;
+  let hostShutdown: HostObs["shutdown"] = { exitMs: null, leftover: 0 };
+  if (peaks.hostPid !== null) {
+    const hostPids = [...new Set([peaks.hostPid, ...peaks.hostPids])];
+    const start = now();
+    if (alive(peaks.hostPid)) kill(peaks.hostPid, "SIGTERM");
+    let left = hostPids.filter(alive);
+    while (left.length > 0 && now() - start < THRESHOLDS.shutdownMs) {
+      await sleep(100);
+      left = hostPids.filter(alive);
+    }
+    hostShutdown = { exitMs: left.length === 0 ? now() - start : null, leftover: left.length };
+    for (const pid of left) kill(pid, "SIGKILL");
+  }
+  for (const e of engines) {
+    e.conn.dispose();
+    e.logStream.end();
+  }
+
+  const statusOf = (e: Engine) => e.finalStatus ?? e.latest;
+  const host: HostObs | null =
+    peaks.hostPid !== null
+      ? { firstPid: peaks.hostFirstPid!, pid: peaks.hostPid, peakTreeKb: peaks.hostKb, shutdown: hostShutdown }
+      : null;
+  const obs: EngineObs[] = engines.map((e, i) => ({
+    chunks: statusOf(e)?.chunks ?? 0,
+    embedded: statusOf(e)?.embedded ?? 0,
+    exitedBeforeShutdown: e.exitInfo,
+    errors: e.errors,
+    rss: {
+      peakTreeKb: peaks.engines[i]!.treeKb,
+      peakEngineKb: peaks.engines[i]!.engineKb,
+      peakChildKb: peaks.engines[i]!.childKb,
+      peakPhase: peaks.engines[i]!.phase,
+    },
+    status: e.statusMs,
+    lexical: e.lexical,
+    hybrid: e.hybrid,
+    similar: e.similar,
+    nr07Ms: e.nr07Ms,
+    shutdown: { exitMs: e.exitMs, leftover: leftoverPids[i]!.length },
+  }));
+  const checks = evaluate({ model, minEmbedded, rssSupported, engines: obs, host });
+  engines.forEach((e, i) => {
+    const prefix = multi ? `p${i + 1}:` : "";
+    if (e.stressIndexed) checks.push({ ...e.stressIndexed, name: prefix + e.stressIndexed.name });
+    if (e.hardError) checks.push({ name: `${prefix}harness`, status: "fail", detail: e.hardError });
+  });
+  const ok = allPassed(checks);
+
+  const mbOf = (kb: number) => Math.round(kb / 1024);
+  const engineReports = engines.map((e, i) => {
+    const status = statusOf(e);
+    let indexDbBytes: number | null = null;
+    try {
+      if (status) indexDbBytes = statSync(join(status.indexDir, "index.db")).size;
+    } catch {
+      indexDbBytes = null;
+    }
+    const seconds = Math.max(1, (e.wallEnd - e.t0) / 1000);
+    return {
+      fixture: { kind: e.fixtureKind, files: status?.files ?? 0, chunks: status?.chunks ?? 0, stressFiles: e.stressFiles, indexDbBytes },
+      embedded: status?.embedded ?? 0,
+      chunks: status?.chunks ?? 0,
+      phase: status?.phase ?? null,
+      initializeMs: Math.round(e.initMs),
+      observedSeconds: Math.round(seconds),
+      chunksPerSec: Number(((status?.embedded ?? 0) / seconds).toFixed(2)),
+      rssMb: {
+        peakTree: mbOf(peaks.engines[i]!.treeKb),
+        peakEngine: mbOf(peaks.engines[i]!.engineKb),
+        peakInference: mbOf(peaks.engines[i]!.childKb),
+        enginePeakPhase: peaks.engines[i]!.phase,
+      },
+      latency: {
+        status: latencyStats(e.statusMs),
+        lexical: latencyStats(e.lexical.map((s) => s.ms)),
+        hybridDuringIndexing: { ...latencyStats(e.hybrid.filter((s) => s.indexing).map((s) => s.ms)), ...searchShares(e.hybrid.filter((s) => s.indexing)) },
+        findSimilarDuringIndexing: { ...latencyStats(e.similar.filter((s) => s.indexing).map((s) => s.ms)), ...searchShares(e.similar.filter((s) => s.indexing)) },
+      },
+      nr07Ms: e.nr07Ms,
+      phases: e.progressPhases,
+      errors: e.errors,
+      exitedBeforeShutdown: e.exitInfo,
+      shutdown: obs[i]!.shutdown,
+      samples: { hybrid: e.hybrid, similar: e.similar, lexical: e.lexical.length },
+      timeline: e.timeline,
+      engineLog: e.logPath,
+    };
+  });
+  const hostReport = host ? { pid: host.pid, peakTreeMb: mbOf(host.peakTreeKb), shutdown: host.shutdown } : null;
+  const limit = rssLimitMb(model);
+  const common = { model, vscode: version, electron, platform, engine: cli, executable: exe };
+  let report: object;
+  if (!multi) {
+    const er = engineReports[0]!;
+    report = {
+      ...common,
+      fixture: er.fixture,
+      embedded: er.embedded,
+      phase: er.phase,
+      initializeMs: er.initializeMs,
+      observedSeconds: er.observedSeconds,
+      chunksPerSec: er.chunksPerSec,
+      rssMb: {
+        supported: rssSupported,
+        peakTree: mbOf(peaks.hostKb + peaks.engines[0]!.treeKb),
+        peakEngine: er.rssMb.peakEngine,
+        peakInference: er.rssMb.peakInference,
+        enginePeakPhase: er.rssMb.enginePeakPhase,
+        peakHost: mbOf(peaks.hostKb),
+      },
+      host: hostReport,
+      latency: er.latency,
+      nr07Ms: er.nr07Ms,
+      phases: er.phases,
+      errors: er.errors,
+      exitedBeforeShutdown: er.exitedBeforeShutdown,
+      shutdown: er.shutdown,
+      samples: er.samples,
+      timeline: er.timeline,
+      checks,
+      ok,
+      engineLog: er.engineLog,
+    };
+  } else {
+    report = {
+      ...common,
+      projects,
+      host: hostReport,
+      engines: engineReports,
+      rssMb: {
+        supported: rssSupported,
+        peakHost: mbOf(peaks.hostKb),
+        sumEngineTrees: mbOf(peaks.engines.reduce((s, p) => s + p.treeKb, 0)),
+        maxEngine: mbOf(Math.max(...peaks.engines.map((p) => p.engineKb))),
+        limit,
+      },
+      checks,
+      ok,
+    };
+  }
   writeFileSync(join(reportDir, `${stem}.json`), JSON.stringify(report, null, 2));
 
-  const r = report.rssMb;
-  const summary = `${label}: ${ok ? "PASS" : "FAIL"} chunks=${report.fixture.chunks} embedded=${report.embedded} ${report.chunksPerSec}/s rss tree=${r.peakTree}MB engine=${r.peakEngine}MB inference=${r.peakInference}MB status p95=${Math.round(report.latency.status.p95)}ms lexical p95=${Math.round(report.latency.lexical.p95)}ms hybrid p95=${Math.round(report.latency.hybridDuringIndexing.p95)}ms nr07=${nr07Ms === null ? "n/a" : Math.round(nr07Ms) + "ms"}`;
+  const hostText = host ? `host=${mbOf(host.peakTreeKb)}MB` : "host=none";
+  const engineText = engineReports
+    .map((er, i) => {
+      const tag = multi ? `p${i + 1} ` : "";
+      return `${tag}chunks=${er.chunks} embedded=${er.embedded} ${er.chunksPerSec}/s engine=${er.rssMb.peakEngine}MB tree=${er.rssMb.peakTree}MB status p95=${Math.round(er.latency.status.p95)}ms lexical p95=${Math.round(er.latency.lexical.p95)}ms hybrid p95=${Math.round(er.latency.hybridDuringIndexing.p95)}ms nr07=${er.nr07Ms === null ? "n/a" : Math.round(er.nr07Ms) + "ms"}`;
+    })
+    .join("\n    ");
+  const summary = `${label}: ${ok ? "PASS" : "FAIL"} rss ${hostText} limit=${limit}MB\n    ${engineText}`;
   console.log(summary);
   for (const c of checks) console.log(`  [${c.status}] ${c.name}: ${c.detail}`);
-  if (!rss.supported) console.warn("  warning: RSS sampling skipped on this platform");
+  if (!rssSupported) console.warn("  warning: RSS sampling skipped on this platform");
 
   rmSync(tmp, { recursive: true, force: true });
   return { model, vscode: version, ok, summary };
