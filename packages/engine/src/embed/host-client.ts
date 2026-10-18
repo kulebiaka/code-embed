@@ -18,6 +18,7 @@ import { initHashing } from "../util/hash";
 import { log } from "../util/log";
 import { probeSocket } from "../util/socket";
 import {
+  HOST_CONFIG_ENV,
   HOST_PROTOCOL_VERSION,
   decodeVector,
   hostKey,
@@ -65,10 +66,11 @@ function spawnHost(key: string, cfg: EmbedHostConfig, env: NodeJS.ProcessEnv): s
   const fd = openSync(logFile, "a");
   try {
     const e = hostEntry();
-    const child = spawn(process.execPath, [...e.execArgv, e.modulePath, ...e.args, JSON.stringify(cfg)], {
+    const child = spawn(process.execPath, [...e.execArgv, e.modulePath, ...e.args], {
       detached: true,
       stdio: ["ignore", fd, fd],
-      env,
+      cwd: cacheDir(),
+      env: { ...env, [HOST_CONFIG_ENV]: JSON.stringify(cfg) },
       windowsHide: true,
     });
     child.on("error", (err) => log.warn(`embedding host failed to start: ${err.message}`));

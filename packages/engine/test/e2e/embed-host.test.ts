@@ -24,9 +24,9 @@ function hostEnv(): NodeJS.ProcessEnv {
   return { ...env, CODE_EMBED_CACHE_DIR: cache, NODE_NO_WARNINGS: "1" };
 }
 
-function startHost(): ChildProcess {
-  const c = spawn(process.execPath, [CLI, "__embed-host", JSON.stringify(cfg)], {
-    env: hostEnv(),
+function startHost(withConfig = true): ChildProcess {
+  const c = spawn(process.execPath, [CLI, "__embed-host"], {
+    env: { ...hostEnv(), ...(withConfig ? { CODE_EMBED_HOST_CONFIG: JSON.stringify(cfg) } : {}) },
     stdio: "ignore",
   });
   children.push(c);
@@ -63,6 +63,12 @@ describe("__embed-host (bundle)", () => {
   it("is hidden from --help", () => {
     const r = spawnSync(process.execPath, [CLI, "--help"], { encoding: "utf8", timeout: 15000 });
     expect(r.stdout + r.stderr).not.toContain("__embed-host");
+  });
+
+  it("exits with an error without CODE_EMBED_HOST_CONFIG", async () => {
+    const c = startHost(false);
+    expect(await exited(c)).not.toBe(0);
+    expect(existsSync(embedHostSocketPath(key))).toBe(false);
   });
 
   it("listens, answers hello without loading the model, and cleans up on SIGTERM", async () => {

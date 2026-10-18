@@ -308,8 +308,18 @@ function isEntry(): boolean {
   }
 }
 
+export const HOST_CONFIG_ENV = "CODE_EMBED_HOST_CONFIG";
+
+export function hostConfigFromEnv(env: NodeJS.ProcessEnv = process.env): EmbedHostConfig {
+  const raw = env[HOST_CONFIG_ENV];
+  if (!raw) throw new Error(`${HOST_CONFIG_ENV} is not set`);
+  return JSON.parse(raw) as EmbedHostConfig;
+}
+
 if (isEntry()) {
-  runEmbedHost(JSON.parse(process.argv[2]!) as EmbedHostConfig).then(
+  Promise.resolve()
+    .then(() => runEmbedHost(hostConfigFromEnv()))
+    .then(
     () => process.exit(0),
     (err: unknown) => {
       log.error(err instanceof Error ? err.message : String(err));
