@@ -8,7 +8,7 @@ import { dockerignoreWarning, ensureIndexDir, LOCK_FILE, META_FILE } from "./ind
 import { acquireLock, isProcessAlive, readLockPid } from "./lock";
 import { detectRiskyPath, INDEX_DIR_NAME, resolveIndexDir } from "./location";
 import { compareMeta, type IndexMeta, readMeta, SCHEMA_VERSION, writeMeta } from "./meta";
-import { cacheDir, canonicalRoot, configDir, embCachePath, modelsDir, rootHash, socketPath } from "./paths";
+import { cacheDir, canonicalRoot, configDir, embCachePath, embedHostSocketPath, modelsDir, rootHash, socketPath } from "./paths";
 import { findProjectRoot } from "./root";
 
 let tmp: string;
@@ -240,6 +240,32 @@ describe("paths", () => {
     vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1000000");
     setPlatform("linux");
     expect(Buffer.byteLength(socketPath(root))).toBeLessThan(108);
+  });
+});
+
+describe("embedHostSocketPath", () => {
+  const key = "0123456789abcdef";
+
+  it("follows the platform conventions", () => {
+    vi.stubEnv("TMPDIR", "/tmpx");
+    vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1");
+    setPlatform("linux");
+    expect(embedHostSocketPath(key)).toBe(`/run/user/1/code-embed/embed-${key}.sock`);
+    vi.stubEnv("XDG_RUNTIME_DIR", "");
+    expect(embedHostSocketPath(key)).toBe(`/tmpx/code-embed/embed-${key}.sock`);
+    setPlatform("darwin");
+    expect(embedHostSocketPath(key)).toBe(`/tmpx/code-embed/embed-${key}.sock`);
+    setPlatform("win32");
+    expect(embedHostSocketPath(key)).toBe(`\\\\.\\pipe\\code-embed-embed-${key}`);
+  });
+
+  it("fits sun_path limits", () => {
+    vi.stubEnv("TMPDIR", "/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/");
+    setPlatform("darwin");
+    expect(Buffer.byteLength(embedHostSocketPath(key))).toBeLessThan(104);
+    vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1000000");
+    setPlatform("linux");
+    expect(Buffer.byteLength(embedHostSocketPath(key))).toBeLessThan(108);
   });
 });
 
