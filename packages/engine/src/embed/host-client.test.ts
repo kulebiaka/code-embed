@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
@@ -310,5 +311,24 @@ describe("createHostEmbedder", () => {
     const sock = hostSocket();
     expect(statSync(sock).mode & 0o777).toBe(0o600);
     expect(statSync(dirname(sock)).mode & 0o777).toBe(0o700);
+  });
+
+  it.skipIf(process.platform === "win32")("keeps the proxy credentials out of the host command line", async () => {
+    const e = createHostEmbedder(
+      getModel(DEFAULTS.model),
+      { modelsDir: join(dir, "models"), threads: 1, proxy: "http://user:s3cret@127.0.0.1:9" },
+      {
+        env: { ...process.env, CODE_EMBED_CACHE_DIR: cache, FIXTURE_SPAWN_LOG: spawnLog },
+        worker: { modulePath: FIXTURE, execArgv: tsxExecArgv() },
+      },
+    );
+    made.push(e);
+    const v = await e.embedQueries(["x"]);
+    expect(v).toHaveLength(1);
+    expect(e.shared).toBe(true);
+    const [pid] = hostPids();
+    const args = spawnSync("ps", ["-o", "args=", "-p", String(pid)], { encoding: "utf8" }).stdout;
+    expect(args).toContain("host");
+    expect(args).not.toContain("s3cret");
   });
 });
