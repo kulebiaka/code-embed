@@ -48,7 +48,7 @@ const PROBE_MS = 200;
 let nextClient = 0;
 
 export function sharedHostEnabled(): boolean {
-  return process.env.CODE_EMBED_SHARED_HOST === "1";
+  return process.env.CODE_EMBED_SHARED_HOST !== "0";
 }
 
 function hostEntry(): { modulePath: string; args: string[]; execArgv: string[] } {
