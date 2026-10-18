@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- The local model now lives in one shared inference process per machine: one copy of the model serves all windows, daemons, MCP servers and CLI runs, and projects index interleaved instead of queueing. `CODE_EMBED_SHARED_HOST=0` restores the previous behavior.
+
 ## [0.1.0] - 2026-10-16
 
 First public release.
