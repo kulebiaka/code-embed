@@ -6,9 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- The local model now lives in one shared inference process per machine: one copy of the model serves all windows, daemons, MCP servers and CLI runs, and projects index interleaved instead of queueing. `CODE_EMBED_SHARED_HOST=0` restores the previous behavior.
+- Opt-in shared inference process per machine (`CODE_EMBED_SHARED_HOST=1`): one copy of the local model serves all windows, daemons, MCP servers and CLI runs, and projects index interleaved instead of queueing.
+
+### Fixed
+
+- Concurrent access to `emb.db` from several processes: `busy_timeout`, a retry of the WAL initialization when the database is busy, `BEGIN IMMEDIATE` on writes, and a non-blocking `last_used` update on reads.
 
 ## [0.1.0] - 2026-10-16
 
