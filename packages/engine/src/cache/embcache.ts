@@ -66,12 +66,23 @@ function fromBlob(b: Uint8Array): Float32Array {
   return fromFloat16(copy);
 }
 
-export function openEmbCache(path: string): EmbCache {
-  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-  const db = new DatabaseSync(path);
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA synchronous = NORMAL");
-  db.exec(`CREATE TABLE IF NOT EXISTS emb (
+const BUSY_TIMEOUT_MS = 5000;
+const SQLITE_BUSY = 5;
+
+function isBusy(e: unknown): boolean {
+  const code = (e as { errcode?: number }).errcode;
+  return typeof code === "number" && (code & 0xff) === SQLITE_BUSY;
+}
+
+// SQLite does not call the busy handler when switching to WAL, so initialization is retried by hand.
+function initWithRetry(db: DatabaseSync): void {
+  const deadline = Date.now() + BUSY_TIMEOUT_MS;
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try {
+      db.exec("PRAGMA journal_mode = WAL");
+      db.exec("PRAGMA synchronous = NORMAL");
+      db.exec(`CREATE TABLE IF NOT EXISTS emb (
     model_id TEXT NOT NULL,
     chunk_hash TEXT NOT NULL,
     dims INTEGER NOT NULL,
@@ -79,7 +90,25 @@ export function openEmbCache(path: string): EmbCache {
     last_used INTEGER NOT NULL,
     PRIMARY KEY (model_id, chunk_hash)
   ) WITHOUT ROWID`);
-  db.exec("CREATE INDEX IF NOT EXISTS emb_last_used ON emb(last_used)");
+      db.exec("CREATE INDEX IF NOT EXISTS emb_last_used ON emb(last_used)");
+      return;
+    } catch (e) {
+      if (!isBusy(e) || Date.now() >= deadline) throw e;
+      Atomics.wait(pause, 0, 0, 10 + Math.random() * 40);
+    }
+  }
+}
+
+export function openEmbCache(path: string): EmbCache {
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    initWithRetry(db);
+  } catch (e) {
+    db.close();
+    throw e;
+  }
 
   const put = db.prepare(
     `INSERT INTO emb (model_id, chunk_hash, dims, vector, last_used) VALUES (?, ?, ?, ?, ?)
@@ -108,7 +137,7 @@ export function openEmbCache(path: string): EmbCache {
     },
     put(modelId, entries) {
       const now = Date.now();
-      db.exec("BEGIN");
+      db.exec("BEGIN IMMEDIATE");
       try {
         for (const e of entries) put.run(modelId, e.chunkHash, e.vector.length, toBlob(e.vector), now);
         db.exec("COMMIT");
