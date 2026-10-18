@@ -1,8 +1,11 @@
+import { fork, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { tsxExecArgv } from "../embed/worker";
 import { fromFloat16, openEmbCache, toFloat16 } from "./embcache";
 import { exportVectors, importVectors } from "./exchange";
 import type { EmbCache } from "./types";
@@ -10,12 +13,15 @@ import type { EmbCache } from "./types";
 const h = (n: number) => n.toString(16).padStart(64, "0");
 let dir: string;
 let cache: EmbCache;
+const children: ChildProcess[] = [];
+const FIXTURE = fileURLToPath(new URL("./embcache.fixture.ts", import.meta.url));
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "emb-"));
   cache = openEmbCache(join(dir, "sub", "emb.db"));
 });
 afterEach(() => {
+  for (const c of children.splice(0)) c.kill("SIGKILL");
   cache.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -104,5 +110,54 @@ describe("exchange", () => {
     writeFileSync(file, gzipSync(Buffer.concat([Buffer.from(JSON.stringify(header) + "\n"), Buffer.alloc(36)])));
     await expect(importVectors(cache, file, { modelId: "m", dims: 2 })).rejects.toThrow(/size/);
     expect(cache.count()).toBe(0);
+  });
+});
+
+describe("concurrent processes", () => {
+  const PROCS = 6;
+  const PUTS = 50;
+
+  it("opens a fresh emb.db and writes from several processes", async () => {
+    for (let round = 0; round < 3; round++) {
+      const path = join(dir, `round-${round}`, "emb.db");
+      const startAt = String(Date.now() + 1500);
+      const runs = Array.from({ length: PROCS }, (_, i) => {
+        const child = fork(FIXTURE, [path, String(i), startAt, String(PUTS)], {
+          execArgv: tsxExecArgv(),
+          env: { ...process.env, NODE_NO_WARNINGS: "1" },
+          stdio: ["ignore", "ignore", "pipe", "ipc"],
+        });
+        children.push(child);
+        let stderr = "";
+        child.stderr?.on("data", (d) => (stderr += d));
+        return new Promise<{ code: number | null; stderr: string }>((resolve) =>
+          child.on("exit", (code) => resolve({ code, stderr })),
+        );
+      });
+      const results = await Promise.all(runs);
+      for (const r of results) expect(r.stderr).toBe("");
+      expect(results.map((r) => r.code)).toEqual(Array(PROCS).fill(0));
+      const check = openEmbCache(path);
+      expect(check.count("m")).toBe(PROCS * PUTS * 32);
+      check.close();
+    }
+  }, 120_000);
+
+  it("waits for a writer holding the lock", { timeout: 30_000 }, async () => {
+    const path = join(dir, "locked", "emb.db");
+    openEmbCache(path).close();
+    const holder = fork(FIXTURE, [path, "hold", "0", "0"], { execArgv: tsxExecArgv() });
+    children.push(holder);
+    await new Promise((resolve, reject) => {
+      holder.once("message", resolve);
+      holder.once("error", reject);
+    });
+    const other = openEmbCache(path);
+    try {
+      other.put("m", [{ chunkHash: h(1), vector: new Float32Array([1]) }]);
+      expect(other.get("m", [h(1)]).size).toBe(1);
+    } finally {
+      other.close();
+    }
   });
 });
