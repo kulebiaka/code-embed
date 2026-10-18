@@ -9,9 +9,14 @@ import { FakeEmbedder } from "./fake";
 
 vi.mock("./local", () => ({ createLocalEmbedder: vi.fn() }));
 vi.mock("./worker", () => ({ createWorkerEmbedder: vi.fn() }));
+vi.mock("./host-client", async (orig) => ({
+  ...(await orig<typeof import("./host-client")>()),
+  createHostEmbedder: vi.fn(),
+}));
 vi.mock("./openai", () => ({ createOpenAIEmbedder: vi.fn() }));
 vi.mock("./keys", () => ({ resolveApiKey: vi.fn(async () => "k") }));
 
+import { createHostEmbedder } from "./host-client";
 import { resolveApiKey } from "./keys";
 import { createLocalEmbedder } from "./local";
 import { createOpenAIEmbedder } from "./openai";
@@ -43,12 +48,14 @@ beforeEach(() => {
   vi.mocked(createLocalEmbedder).mockReset();
   vi.mocked(createOpenAIEmbedder).mockReset();
   vi.mocked(createWorkerEmbedder).mockReset();
+  vi.mocked(createHostEmbedder).mockReset();
 });
 
 afterEach(() => {
   delete process.env.CODE_EMBED_CONFIG_DIR;
   delete process.env.CODE_EMBED_FAKE_EMBEDDER;
   delete process.env.CODE_EMBED_FAKE_DIMS;
+  delete process.env.CODE_EMBED_SHARED_HOST;
 });
 
 describe("isLoopbackUrl", () => {
@@ -75,11 +82,21 @@ describe("resolveEmbedder", () => {
     expect(createLocalEmbedder).not.toHaveBeenCalled();
   });
 
+  it("uses the shared inference host under CODE_EMBED_SHARED_HOST", async () => {
+    process.env.CODE_EMBED_SHARED_HOST = "1";
+    vi.mocked(createHostEmbedder).mockReturnValue(new FakeEmbedder());
+    await resolveEmbedder({ root: "/p", settings: settings() });
+    expect(vi.mocked(createHostEmbedder).mock.calls[0]![0].id).toBe(DEFAULTS.model);
+    expect(vi.mocked(createHostEmbedder).mock.calls[0]![2]).toEqual({ project: "/p" });
+    expect(createWorkerEmbedder).not.toHaveBeenCalled();
+  });
+
   it("keeps static models in process", async () => {
     vi.mocked(createLocalEmbedder).mockReturnValue(new FakeEmbedder());
     await resolveEmbedder({ root: "/p", settings: settings({ model: "potion-code-16m" }) });
     expect(vi.mocked(createLocalEmbedder).mock.calls[0]![0].id).toBe("potion-code-16m");
     expect(createWorkerEmbedder).not.toHaveBeenCalled();
+    expect(createHostEmbedder).not.toHaveBeenCalled();
   });
 
   it("rejects external providers without consent", async () => {

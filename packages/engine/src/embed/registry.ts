@@ -4,6 +4,7 @@ import { modelsDir } from "../core/paths";
 import { ConsentRequiredError } from "../errors";
 import { getModel } from "./catalog";
 import { FakeEmbedder } from "./fake";
+import { createHostEmbedder, sharedHostEnabled } from "./host-client";
 import { resolveApiKey } from "./keys";
 import { createLocalEmbedder } from "./local";
 import { withQueryCache } from "./lru";
@@ -42,8 +43,11 @@ export async function resolveEmbedder(opts: ResolveEmbedderOptions): Promise<Emb
       offlineArchive: settings.offlineArchive,
       proxy: settings.proxy,
     };
+    if (entry.pooling === "static") return withQueryCache(createLocalEmbedder(entry, localOpts));
     return withQueryCache(
-      entry.pooling === "static" ? createLocalEmbedder(entry, localOpts) : createWorkerEmbedder(entry, localOpts),
+      sharedHostEnabled()
+        ? createHostEmbedder(entry, localOpts, { project: root })
+        : createWorkerEmbedder(entry, localOpts),
     );
   }
   const name = settings.provider;

@@ -18,7 +18,7 @@ import type { LocalEngine } from "../engine/types";
 import { LockedError } from "../errors";
 import { initHashing } from "../util/hash";
 import { log } from "../util/log";
-import { probeSocket } from "./client";
+import { probeSocket } from "../util/socket";
 import { indexDirFor } from "./index-dir";
 
 export interface DaemonOptions {

@@ -1,4 +1,4 @@
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { LOCK_FILE } from "./index-dir";
 
@@ -7,9 +7,9 @@ export interface LockHandle {
   release(): void;
 }
 
-export function readLockPid(dir: string): number | null {
+export function readLockPid(dir: string, name = LOCK_FILE): number | null {
   try {
-    const pid = Number.parseInt(readFileSync(join(dir, LOCK_FILE), "utf8").trim(), 10);
+    const pid = Number.parseInt(readFileSync(join(dir, name), "utf8").trim(), 10);
     return Number.isInteger(pid) && pid > 0 ? pid : null;
   } catch {
     return null;
@@ -25,8 +25,20 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
-export function acquireLock(dir: string): LockHandle | null {
-  const file = join(dir, LOCK_FILE);
+const FRESH_MS = 2000;
+
+// an empty file: the holder is between creating it and writing its pid
+function isBeingWritten(file: string): boolean {
+  try {
+    const st = statSync(file);
+    return st.size === 0 && Date.now() - st.mtimeMs < FRESH_MS;
+  } catch {
+    return false;
+  }
+}
+
+export function acquireLock(dir: string, name = LOCK_FILE): LockHandle | null {
+  const file = join(dir, name);
   const pid = process.pid;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -34,12 +46,13 @@ export function acquireLock(dir: string): LockHandle | null {
       return {
         pid,
         release() {
-          if (readLockPid(dir) === pid) rmSync(file, { force: true });
+          if (readLockPid(dir, name) === pid) rmSync(file, { force: true });
         },
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      const holder = readLockPid(dir);
+      const holder = readLockPid(dir, name);
+      if (holder === null && isBeingWritten(file)) return null;
       if (holder !== null && holder !== pid && isProcessAlive(holder)) return null;
       rmSync(file, { force: true });
     }

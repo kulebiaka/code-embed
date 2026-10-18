@@ -51,7 +51,9 @@ function touch(list: string[], paths: string[]): void {
 }
 
 export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
-  const { ctx, embCache, embedder, slot } = deps;
+  const { ctx, embCache, embedder } = deps;
+  // a shared inference host interleaves projects itself
+  const slot = () => (embedder.shared ? undefined : deps.slot);
   const isActive = deps.isActive ?? (() => true);
   const batchSize = deps.batchSize ?? 32;
   const commitEvery = deps.commitEvery ?? 8;
@@ -172,7 +174,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
         if (stopped) break;
         if (paused) {
           flush();
-          slot?.release();
+          slot()?.release();
           announced = false;
           progress("paused");
           setState("paused");
@@ -187,7 +189,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
           }
           if (onBattery) {
             flush();
-            slot?.release();
+            slot()?.release();
             announced = false;
             progress("paused");
             setState("paused");
@@ -200,7 +202,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
           if (!dimsReady && embedder.info.dims <= 0) await prepare();
           const rows = nextBatch();
           if (rows.length === 0) break;
-          if (slot && !slot.tryAcquire(isActive())) {
+          if (slot()?.tryAcquire(isActive()) === false) {
             flush();
             if (state !== "queued") progress("queued");
             announced = false;
@@ -214,16 +216,16 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
           if (!dimsReady) await prepare();
           await processBatch(rows);
           backoff = BACKOFF_START_MS;
-          if (slot?.shouldYield(isActive())) {
+          if (slot()?.shouldYield(isActive())) {
             flush();
-            slot.release();
+            slot()!.release();
             await embedder.unload?.();
           }
         } catch (err) {
           if (stopped) break;
           if (err instanceof ProviderUnavailableError) {
             flush();
-            slot?.release();
+            slot()?.release();
             setState("waiting-provider");
             ctx.onError({ message: `embedding provider unavailable: ${err.message}` });
             const delay = err.retryAfterMs ?? backoff;
@@ -238,7 +240,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
         }
       }
     } finally {
-      slot?.release();
+      slot()?.release();
       try {
         flush();
       } catch (err) {

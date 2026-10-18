@@ -35,10 +35,17 @@ export function rootHash(root: string): string {
   return blake3Hex(canonicalRoot(root)).slice(0, 16);
 }
 
-export function socketPath(root: string): string {
-  const hash = rootHash(root);
-  if (process.platform === "win32") return `\\\\.\\pipe\\code-embed-${hash}`;
+function localSocket(name: string): string {
+  if (process.platform === "win32") return `\\\\.\\pipe\\code-embed-${name}`;
   const tmp = process.env.TMPDIR || tmpdir();
   const base = process.platform === "linux" ? process.env.XDG_RUNTIME_DIR || tmp : tmp;
-  return join(base, "code-embed", `${hash}.sock`);
+  return join(base, "code-embed", `${name}.sock`);
+}
+
+export function socketPath(root: string): string {
+  return localSocket(rootHash(root));
+}
+
+export function embedHostSocketPath(key: string): string {
+  return localSocket(`embed-${key}`);
 }

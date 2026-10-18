@@ -1,4 +1,3 @@
-import { connect, type Socket } from "node:net";
 import { createEngineProxy, PROTOCOL_VERSION, type EngineApi } from "@code-embed/protocol";
 import { StreamMessageReader, StreamMessageWriter, createMessageConnection } from "vscode-jsonrpc/node";
 import { isProcessAlive, readLockPid } from "../core/lock";
@@ -6,28 +5,11 @@ import { socketPath } from "../core/paths";
 import { createLocalEngine } from "../engine/service";
 import type { LocalEngine, LocalEngineOptions } from "../engine/types";
 import { initHashing } from "../util/hash";
+import { probeSocket } from "../util/socket";
 import { indexDirFor } from "./index-dir";
 
 export interface RemoteEngine extends EngineApi {
   close(): void;
-}
-
-export function probeSocket(path: string, timeoutMs: number): Promise<Socket | null> {
-  return new Promise((resolve) => {
-    const socket = connect(path);
-    const timer = setTimeout(() => fail(), timeoutMs);
-    const fail = () => {
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(null);
-    };
-    socket.once("error", fail);
-    socket.once("connect", () => {
-      clearTimeout(timer);
-      socket.removeListener("error", fail);
-      resolve(socket);
-    });
-  });
 }
 
 export async function connectDaemon(

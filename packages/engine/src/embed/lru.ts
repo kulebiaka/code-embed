@@ -13,6 +13,9 @@ export function withQueryCache(e: Embedder, capacity = 1000): Embedder {
     get info() {
       return e.info;
     },
+    get shared() {
+      return e.shared;
+    },
     init: (signal) => e.init(signal),
     async embedQueries(texts, signal) {
       const out: (Float32Array | undefined)[] = texts.map((t) => {
@@ -37,6 +40,7 @@ export function withQueryCache(e: Embedder, capacity = 1000): Embedder {
     embedDocuments: (texts, signal) => e.embedDocuments(texts, signal),
     countTokens: (text) => e.countTokens(text),
     unload: e.unload && (() => e.unload!()),
+    setActive: e.setActive && ((active) => e.setActive!(active)),
     dispose: () => e.dispose(),
   };
 }

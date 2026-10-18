@@ -228,6 +228,18 @@ describe("vector phase", () => {
     expect(other.tryAcquire(true)).toBe(true);
   });
 
+  it("ignores the slot while inference runs in the shared host", async () => {
+    addFile("a.ts", ["one", "two"]);
+    const other = createVectorSlot(join(dir, "slot"));
+    other.tryAcquire(true);
+    const emb = Object.assign(new FakeEmbedder({ dims: 8 }), { shared: true });
+    const phase = createVectorPhase({ ctx, embCache: cache, embedder: emb, slot: createVectorSlot(join(dir, "slot")) });
+    phase.start();
+    await phase.whenIdle();
+    expect(store.counts().embedded).toBe(2);
+    other.release();
+  });
+
   it("does not load the model or take the slot when nothing is pending", async () => {
     const emb = new FakeEmbedder({ dims: 8 });
     const init = vi.spyOn(emb, "init");

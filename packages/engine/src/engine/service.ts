@@ -172,6 +172,7 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
   const slot = createVectorSlot();
 
   const setupVector = () => {
+    embedder?.setActive?.(active);
     vector =
       embedder && !readOnly
         ? createVectorPhase({
@@ -508,6 +509,7 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
     setActive(p: ActivityParams) {
       if (readOnly || closed || active === p.active) return;
       active = p.active;
+      embedder?.setActive?.(active);
       if (active) void catchUp();
     },
     onProgress(cb): Disposable {

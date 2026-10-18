@@ -19,6 +19,10 @@ export interface Embedder {
   countTokens(text: string): number;
   // Frees the model's memory; the next request loads it again.
   unload?(): Promise<void>;
+  // true while inference runs in the machine-wide host shared by all engines.
+  readonly shared?: boolean;
+  // The shared host serves batches of active engines first.
+  setActive?(active: boolean): void;
   dispose(): Promise<void>;
 }
 

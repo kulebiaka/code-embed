@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { runEmbedHost, type EmbedHostConfig } from "../embed/host";
 import { runEmbedWorker } from "../embed/worker-child";
 import { SERVER_VERSION } from "../engine/service";
 import { log } from "../util/log";
@@ -44,6 +45,10 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
       return EXIT.ERROR;
     }
     await runEmbedWorker();
+    process.exit(EXIT.OK);
+  }
+  if (first === "__embed-host") {
+    await runEmbedHost(JSON.parse(argv[1] ?? "") as EmbedHostConfig);
     process.exit(EXIT.OK);
   }
   if (first !== undefined && Object.hasOwn(COMMANDS, first)) {

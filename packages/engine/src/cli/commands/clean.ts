@@ -2,9 +2,9 @@ import { rm } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { socketPath } from "../../core/paths";
-import { probeSocket } from "../../server/client";
 import { indexDirFor } from "../../server/index-dir";
 import { initHashing } from "../../util/hash";
+import { probeSocket } from "../../util/socket";
 import { resolveRoot } from "../open";
 import { EXIT, type CliIO, type CommandRun } from "../types";
 

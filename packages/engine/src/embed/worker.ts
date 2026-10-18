@@ -74,11 +74,11 @@ interface Inflight {
   reject(e: unknown): void;
 }
 
-function toError(e: { name: string; message: string; retryAfterMs?: number }): Error {
+export function toError(e: { name: string; message: string; retryAfterMs?: number }): Error {
   return e.name === "ProviderUnavailableError" ? new ProviderUnavailableError(e.message, e.retryAfterMs) : new Error(e.message);
 }
 
-function splitDocuments(texts: string[]): number[][] {
+export function splitDocuments(texts: string[]): number[][] {
   const order = texts.map((_, i) => i).sort((a, b) => texts[a]!.length - texts[b]!.length);
   const groups: number[][] = [];
   let cur: number[] = [];

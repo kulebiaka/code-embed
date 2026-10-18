@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -119,6 +119,15 @@ describe("lock", () => {
 
   it("takes over garbage lock content", () => {
     writeFileSync(join(tmp, LOCK_FILE), "junk");
+    expect(acquireLock(tmp)).not.toBeNull();
+  });
+
+  it("waits for a fresh empty lock and takes over a stale one", () => {
+    const file = join(tmp, LOCK_FILE);
+    writeFileSync(file, "");
+    expect(acquireLock(tmp)).toBeNull();
+    const past = new Date(Date.now() - 10_000);
+    utimesSync(file, past, past);
     expect(acquireLock(tmp)).not.toBeNull();
   });
 });

@@ -42,6 +42,15 @@ The local model does not run in the engine's main process but in a child process
 - Background window: the extension sends the engine `client.activity` (`active: false`) when the VS Code window has been out of focus for more than 30 seconds. A background engine keeps embedding chunks it has already found but does not look for changes: watcher events are queued and the startup scan is postponed. Everything queued is applied when the window regains focus or a search comes in. A daemon counts as background only if all connected clients are.
 - A crash of the inference process becomes `ProviderUnavailableError("local inference process exited …")`: an `index.error` is emitted, `status.lastError` contains `embedding provider unavailable: …`, and search answers from lexical results with `partial: true`. The vector phase waits and restarts the process; after 3 crashes in a row it pauses for 10 minutes.
 
+#### Shared inference host (experimental, `CODE_EMBED_SHARED_HOST=1`)
+
+With the flag set, engines do not start their own `__embed-worker`. Instead they connect to a machine-wide `cli.js __embed-host` process, one per model, thread count, models directory and engine version, so a single copy of the model serves every window, daemon, MCP server and CLI ([plan](plans/shared-inference-host.md)).
+
+- Socket: `<tmp>/code-embed/embed-<key>.sock` (mode 0600), on Windows `\\.\pipe\code-embed-embed-<key>`. The engine starts the host detached if the socket is missing and waits up to 15 s. Concurrent starts are settled by `embed-host-<key>.lock` in the cache directory, and the host logs to `logs/embed-host-<key>.log`. If the host does not come up, the engine falls back to its own `__embed-worker` and the `vector-slot/` queue as before.
+- Protocol: JSON-RPC with `hello`, `embed` (vectors as base64 of `Float32Array`) and the `activity` notification. Cancellation goes through `$/cancelRequest`.
+- Queue: queries and single-request documents go straight to the inference child, which keeps the query → interactive → batch order. Batch requests go through the host one at a time: active engines first, then round-robin across engines, so projects interleave instead of waiting for each other. `vector-slot/` is skipped while the host is in use.
+- Lifecycle: the host keeps today's worker rules (model loaded on demand, unloaded after 5 minutes idle, 3 crashes in a row pause it for 10 minutes) and exits after 10 minutes without clients. If the host dies, in-flight requests fail with `ProviderUnavailableError` and the next request starts a new host.
+
 ### Real-model smoke test
 
 Fast tests use `CODE_EMBED_FAKE_EMBEDDER=1`, so the real model under VS Code's Electron is checked by a separate opt-in run (`eval/stage0/real-model.ts`). It builds a VSIX for the host, launches the packaged `dist/engine/cli.js serve` with the VS Code executable (on macOS, `Code Helper (Plugin)`) and `ELECTRON_RUN_AS_NODE=1`, just like the extension does, indexes a fixture with the real model and checks for crashes, the peak RSS of the process tree, `status` and search responsiveness, NR-07 latency and a clean exit without leftover children:
