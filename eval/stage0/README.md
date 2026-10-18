@@ -60,7 +60,7 @@ pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts \
 
 Environment: `REAL_MODEL_REPORT_DIR` (default `eval/reports/real-model`), `CODE_EMBED_MODELS_DIR` (shared model directory; defaults to the engine cache), `VSCODE_TEST_CACHE` (VS Code cache, default `$TMPDIR/code-embed-vscode-test`). Each run uses temporary `CODE_EMBED_CACHE_DIR` (with a `models` link to the shared directory and an empty `emb.db`) and `CODE_EMBED_CONFIG_DIR`. If the installed VS Code does not start (for example, a broken signature), it is downloaded again. Exit code 0 means every check of every model × version combination is green.
 
-`--projects <n>` starts n engines (`cli serve`), one per project (`<tmp>/project-<i>`, each a copy of the fixture with its own `git init`). All of them share the run's `CODE_EMBED_CACHE_DIR` and `CODE_EMBED_CONFIG_DIR`, which stands for "one machine": the shared inference host key includes the models directory, so the engines connect to a single host. Every engine gets its own probes, log file and checks; the observation ends when all engines are indexed or the window is over. `CODE_EMBED_SHARED_HOST=0` in the environment is passed to the engines and gives the old layout (an inference process per engine, no host); the host checks are then skipped.
+`--projects <n>` starts n engines (`cli serve`), one per project (`<tmp>/project-<i>`, each a copy of the fixture with its own `git init`). All of them share the run's `CODE_EMBED_CACHE_DIR` and `CODE_EMBED_CONFIG_DIR`, which stands for "one machine": the shared inference host key includes the models directory, so with the host on the engines connect to a single host. Every engine gets its own probes, log file and checks; the observation ends when all engines are indexed or the window is over. The host is enabled by `CODE_EMBED_SHARED_HOST=1` in the run's environment (passed to the engines); without it the old layout applies (an inference process per engine, `vector-slot/`) and the host checks are skipped.
 
 Shared host accounting: the first engine starts the host (`cli.js __embed-host`) detached, so while that engine is alive the host is its child, and afterwards it is reparented to init. The host is found by the pid in `<cacheDir>/embed-host-*.lock` (it must be alive) on every RSS sample. Its tree (host + its inference process) is measured separately from the engine trees, and the host subtree is subtracted from the engine tree it hangs under, so nothing is counted twice. Without a host the accounting is the old one: the engine tree.
 
@@ -98,7 +98,7 @@ The file `real-model-<model>-<vscode>-<platform>-<arch>.json` with `….engine.l
 Example, three projects on one machine (one shared host):
 
 ```bash
-pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --projects 3
+CODE_EMBED_SHARED_HOST=1 pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --projects 3
 ```
 
 CI: the `real-model` job in `native-smoke.yml` (macos-14, ubuntu-22.04, windows-2022).

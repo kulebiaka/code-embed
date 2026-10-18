@@ -75,8 +75,8 @@ describe("isLoopbackUrl", () => {
 });
 
 describe("resolveEmbedder", () => {
-  it("runs transformer models in the inference worker when the host is disabled", async () => {
-    process.env.CODE_EMBED_SHARED_HOST = "0";
+  it.each([undefined, "0", ""])("runs transformer models in the inference worker when CODE_EMBED_SHARED_HOST is %j", async (v) => {
+    if (v !== undefined) process.env.CODE_EMBED_SHARED_HOST = v;
     vi.mocked(createWorkerEmbedder).mockReturnValue(new FakeEmbedder());
     await resolveEmbedder({ root: "/p", settings: settings() });
     expect(vi.mocked(createWorkerEmbedder).mock.calls[0]![0].id).toBe(DEFAULTS.model);
@@ -84,8 +84,8 @@ describe("resolveEmbedder", () => {
     expect(createHostEmbedder).not.toHaveBeenCalled();
   });
 
-  it.each([undefined, "1", ""])("uses the shared inference host when CODE_EMBED_SHARED_HOST is %j", async (v) => {
-    if (v !== undefined) process.env.CODE_EMBED_SHARED_HOST = v;
+  it("uses the shared inference host when CODE_EMBED_SHARED_HOST is 1", async () => {
+    process.env.CODE_EMBED_SHARED_HOST = "1";
     vi.mocked(createHostEmbedder).mockReturnValue(new FakeEmbedder());
     await resolveEmbedder({ root: "/p", settings: settings() });
     expect(vi.mocked(createHostEmbedder).mock.calls[0]![0].id).toBe(DEFAULTS.model);
