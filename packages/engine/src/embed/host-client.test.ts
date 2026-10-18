@@ -1,12 +1,23 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  ErrorCodes,
+  ResponseError,
+  StreamMessageReader,
+  StreamMessageWriter,
+  createMessageConnection,
+} from "vscode-jsonrpc/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULTS } from "../config/types";
 import { isProcessAlive } from "../core/lock";
+import { embedHostSocketPath } from "../core/paths";
 import { ProviderUnavailableError } from "../errors";
+import { initHashing } from "../util/hash";
 import { getModel } from "./catalog";
+import { hostKey } from "./host";
 import { createHostEmbedder, type HostEmbedderOptions } from "./host-client";
 import type { Embedder } from "./types";
 import { tsxExecArgv } from "./worker";
@@ -43,6 +54,18 @@ function make(env: Record<string, string> = {}, o: HostEmbedderOptions = {}): Em
   return e;
 }
 
+function hostSocket(): string {
+  return embedHostSocketPath(
+    hostKey({
+      model: DEFAULTS.model,
+      opts: { modelsDir: join(dir, "models"), threads: 1 },
+      worker: { modulePath: FIXTURE, execArgv: tsxExecArgv() },
+      idleUnloadMs: undefined,
+      idleExitMs: undefined,
+    }),
+  );
+}
+
 function hostPids(): number[] {
   return readdirSync(cache)
     .filter((n) => n.startsWith("embed-host-") && n.endsWith(".lock"))
@@ -72,8 +95,10 @@ const vec = (v: Float32Array | undefined) => Array.from(v!);
 const docs = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix} ${i}`);
 
 let savedCache: string | undefined;
+let rogue: Server | undefined;
 
-beforeEach(() => {
+beforeEach(async () => {
+  await initHashing();
   dir = mkdtempSync(join(tmpdir(), "ce-host-"));
   cache = join(dir, "cache");
   spawnLog = join(dir, "spawns.log");
@@ -82,6 +107,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  await new Promise<void>((r) => (rogue ? rogue.close(() => r()) : r()));
+  rogue = undefined;
   await Promise.all(made.splice(0).map((e) => e.dispose()));
   let pids: number[] = [];
   try {
@@ -225,5 +252,63 @@ describe("createHostEmbedder", () => {
     await a.dispose();
     await expect(a.embedQueries(["x"])).rejects.toThrow("embedder disposed");
     await expect(a.init()).rejects.toThrow("embedder disposed");
+  });
+
+  it("serves queries and interactive requests before the queued batches", async () => {
+    const a = make({ FIXTURE_BUSY_MS: "100" });
+    const b = make({ FIXTURE_BUSY_MS: "100" });
+    const c = make({ FIXTURE_BUSY_MS: "100" });
+    await Promise.all([a.init(), b.init(), c.init()]);
+    const order: string[] = [];
+    const batches = [a, b].flatMap((e, n) =>
+      [0, 1, 2].map((i) => e.embedDocuments(docs(`batch${n}${i}`, 16)).then(() => order.push(`batch-${n}${i}`))),
+    );
+    await sleep(150);
+    await Promise.all([
+      c.embedQueries(["q"]).then(() => order.push("query")),
+      c.embedDocuments(["one short text"]).then(() => order.push("interactive")),
+    ]);
+    const last = Math.max(order.indexOf("query"), order.indexOf("interactive"));
+    expect(order.slice(0, last).filter((n) => n.startsWith("batch-")).length).toBeLessThanOrEqual(1);
+    await Promise.all(batches);
+    expect(order).toHaveLength(8);
+  });
+
+  it("uses a private inference process when the host rejects the handshake", async () => {
+    const sock = hostSocket();
+    mkdirSync(dirname(sock), { recursive: true });
+    rmSync(sock, { force: true });
+    rogue = createServer((socket) => {
+      socket.on("error", () => {});
+      const conn = createMessageConnection(new StreamMessageReader(socket), new StreamMessageWriter(socket));
+      conn.onRequest("hello", () => {
+        throw new ResponseError(ErrorCodes.InvalidRequest, "protocol mismatch");
+      });
+      conn.listen();
+    });
+    await new Promise<void>((r) => rogue!.listen(sock, r));
+    const a = make();
+    const texts = docs("doc", 10);
+    const vs = await a.embedDocuments(texts);
+    vs.forEach((v, i) => expect(vec(v)).toEqual(vec(fakeVector(texts[i]!))));
+    expect(a.shared).toBe(false);
+    expect(spawns()).toHaveLength(1);
+  });
+
+  it("loads the model on the first request, not on connect", async () => {
+    const a = make();
+    await a.init();
+    expect(hostPids()).toHaveLength(1);
+    expect(spawns()).toHaveLength(0);
+    await a.embedQueries(["x"]);
+    expect(spawns()).toHaveLength(1);
+  });
+
+  it.skipIf(process.platform === "win32")("restricts the socket to the current user", async () => {
+    const a = make();
+    await a.embedQueries(["x"]);
+    const sock = hostSocket();
+    expect(statSync(sock).mode & 0o777).toBe(0o600);
+    expect(statSync(dirname(sock)).mode & 0o777).toBe(0o700);
   });
 });
