@@ -54,34 +54,51 @@ pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts \
   [--engine <path/to/cli.js>] # default: build a VSIX for the host and unpack it
   [--repo <dir>]              # default: the stress fixture (stress-fixture.ts)
   [--minutes <n>]             # observation window, default 5
+  [--projects <n>]            # engines on one machine, default 1 (integer >= 1)
   [--min-embedded <n>]        # default 300
 ```
 
 Environment: `REAL_MODEL_REPORT_DIR` (default `eval/reports/real-model`), `CODE_EMBED_MODELS_DIR` (shared model directory; defaults to the engine cache), `VSCODE_TEST_CACHE` (VS Code cache, default `$TMPDIR/code-embed-vscode-test`). Each run uses temporary `CODE_EMBED_CACHE_DIR` (with a `models` link to the shared directory and an empty `emb.db`) and `CODE_EMBED_CONFIG_DIR`. If the installed VS Code does not start (for example, a broken signature), it is downloaded again. Exit code 0 means every check of every model × version combination is green.
 
+`--projects <n>` starts n engines (`cli serve`), one per project (`<tmp>/project-<i>`, each a copy of the fixture with its own `git init`). All of them share the run's `CODE_EMBED_CACHE_DIR` and `CODE_EMBED_CONFIG_DIR`, which stands for "one machine": the shared inference host key includes the models directory, so the engines connect to a single host. Every engine gets its own probes, log file and checks; the observation ends when all engines are indexed or the window is over. `CODE_EMBED_SHARED_HOST=0` in the environment is passed to the engines and gives the old layout (an inference process per engine, no host); the host checks are then skipped.
+
+Shared host accounting: the first engine starts the host (`cli.js __embed-host`) detached, so while that engine is alive the host is its child, and afterwards it is reparented to init. The host is found by the pid in `<cacheDir>/embed-host-*.lock` (it must be alive) on every RSS sample. Its tree (host + its inference process) is measured separately from the engine trees, and the host subtree is subtracted from the engine tree it hangs under, so nothing is counted twice. Without a host the accounting is the old one: the engine tree.
+
 Observation lasts until `embedded === chunks` or the end of the window (model load time is not counted). Probes: process tree RSS (`ps`, every 250 ms; skipped on Windows), `status` (1 s), lexical search (2 s), hybrid (5 s, once vectors exist), `findSimilar` (10 s), NR-07 (once, ≥ 20 s after the first vectors).
 
 | Check | Threshold |
 | --- | --- |
-| `no-crash` | no engine exit before `shutdown`; no `inference process exited`, `SIGTRAP`, `SIGABRT`, `SIGSEGV` in errors |
+| `no-crash` | no engine exit before `shutdown`; no `inference process exited`, `SIGTRAP`, `SIGABRT`, `SIGSEGV` in errors; the host pid did not change during the run (`host restarted: <old> → <new>`) |
 | `progress` | `embedded ≥ min(--min-embedded, chunks)` |
-| `rss` | peak tree total: 2560 MB for `qwen3-embedding-0.6b`, 1024 MB for `bge-m3`, 1024 MB for the rest (models ≤ 300M; a temporary user-approved deviation from NR-08's 700 MB) |
+| `rss` | limit L: 2560 MB for `qwen3-embedding-0.6b`, 1024 MB for `bge-m3`, 1024 MB for the rest (models ≤ 300M; a temporary user-approved deviation from NR-08's 700 MB). One project: peak host tree + peak engine tree (without the host) ≤ L; with no host this is the old peak tree total. Several projects (n): peak host tree + Σ peak engine tree (without the host) ≤ L + n × max peak RSS of an engine process (without children) in the same run |
+| `rss-host` | peak host tree (host + inference process) ≤ L; `skip` when no host was observed |
 | `status-p95`, `lexical-p95` | ≤ 200 ms |
 | `nr07` | ≤ 1000 ms from a file write to the identifier showing up in lexical search |
 | `hybrid-during-indexing`, `find-similar-during-indexing` | p95 and max ≤ 1300 ms; a response slower than 800 ms must be `partial: true` with `timed out` |
-| `shutdown` | exit ≤ 10 s, no children left |
+| `shutdown` | every engine exits ≤ 10 s, no children left except the shared host |
+| `shutdown-host` | after the engines exit the eval sends the host `SIGTERM`; the host and every pid of its last observed tree are gone ≤ 10 s; `skip` without a host. Anything still alive is then `SIGKILL`ed |
 | `stress-indexed` | `stress/*` files are found by lexical search (stress fixture only) |
+
+With `--projects` greater than 1 the per-engine checks are named `p<i>:<check>` (`p1:status-p95`, …); `rss`, `rss-host`, `shutdown-host` and the host-restart failure (`no-crash`) are machine-wide and unprefixed. The status, lexical, hybrid, `findSimilar` and NR-07 thresholds are the same as for one project.
 
 Thresholds are constants in `real-model-report.ts`; do not relax them when the result is red — that is a product defect.
 
 ### Reading the report
 
-The file `real-model-<model>-<vscode>-<platform>-<arch>.json` with `….engine.log` (engine stderr) next to it.
+The file `real-model-<model>-<vscode>-<platform>-<arch>.json` with `….engine.log` (engine stderr) next to it. With `--projects n` (n > 1) the name gets the suffix `-p<n>` and there is one `….engine-<i>.log` per engine.
 
-- `rssMb`: `peakTree` (total), `peakEngine` (main process), `peakInference` (`__embed-worker`), `enginePeakPhase` (the phase at which the main process peaked).
+- `rssMb`: `peakTree` (host peak + engine tree peak), `peakEngine` (main process), `peakInference` (inference children of the engine itself; zero when the host runs the model), `enginePeakPhase` (the phase at which the main process peaked), `peakHost` (host tree peak).
+- `host`: `{ pid, peakTreeMb, shutdown }`, or `null` when no host was observed.
+- With `--projects n` (n > 1): `projects`, `host`, `engines[]` (per engine: `fixture`, `embedded`, `chunks`, `rssMb { peakTree, peakEngine, … }`, `latency`, `nr07Ms`, `engineLog`, …) and `rssMb { peakHost, sumEngineTrees, maxEngine, limit }`.
 - `fixture`: files, chunks, `index.db` size; `embedded`, `chunksPerSec`.
 - `latency`: percentiles for `status` and lexical search; for hybrid and `findSimilar` during indexing also `semanticShare` (share of answers with semantics) and `timedOutShare` (share of answers that timed out).
 - `checks[]`: a verdict per check (`pass` / `fail` / `skip`) with details; `ok` means zero failures.
 - `timeline`: indexing progress; `errors`: every `index.error` and `status.lastError`.
+
+Example, three projects on one machine (one shared host):
+
+```bash
+pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --projects 3
+```
 
 CI: the `real-model` job in `native-smoke.yml` (macos-14, ubuntu-22.04, windows-2022).
