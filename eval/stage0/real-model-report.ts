@@ -98,7 +98,7 @@ export function parsePs(text: string): PsEntry[] {
   return out;
 }
 
-export function descendants(entries: PsEntry[], rootPid: number): number[] {
+export function descendants(entries: Pick<PsEntry, "pid" | "ppid">[], rootPid: number): number[] {
   const byParent = new Map<number, number[]>();
   for (const e of entries) {
     const list = byParent.get(e.ppid) ?? [];
@@ -170,6 +170,26 @@ export function recordSample(peaks: RssPeaks, split: RssSplit, hostPid: number |
     }
     if (tree.childrenKb > p.childKb) p.childKb = tree.childrenKb;
   });
+}
+
+export function inferenceProcesses(
+  psText: string,
+  cli: string,
+  hostPid: number | null,
+  enginePids: number[],
+): { hostWorkers: number; engineWorkers: number[] } {
+  const rows: { pid: number; ppid: number; command: string }[] = [];
+  for (const line of psText.split(/\r?\n/)) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), command: m[3]! });
+  }
+  const workers = new Set(rows.filter((r) => r.command.includes(cli) && /\s__embed-worker(\s|$)/.test(r.command)).map((r) => r.pid));
+  const hostTree = hostPid === null ? [] : descendants(rows, hostPid);
+  const hostSet = new Set(hostTree);
+  return {
+    hostWorkers: hostTree.filter((pid) => workers.has(pid)).length,
+    engineWorkers: enginePids.flatMap((pid) => descendants(rows, pid).filter((p) => workers.has(p) && !hostSet.has(p))),
+  };
 }
 
 // ps -A -o pid=,command=; only processes started from this run's cli.js, so a real VS Code window's engine is never touched

@@ -25,6 +25,7 @@ import {
   THRESHOLDS,
   allPassed,
   evaluate,
+  inferenceProcesses,
   latencyStats,
   newPeaks,
   parsePs,
@@ -154,6 +155,11 @@ async function psSnapshot() {
   return parsePs(stdout);
 }
 
+async function psCommands(): Promise<string> {
+  const { stdout } = await run("ps", ["-A", "-o", "pid=,ppid=,command="], { maxBuffer: 32 * 1024 * 1024 });
+  return stdout;
+}
+
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -264,7 +270,7 @@ function startEngine(index: number, m: Machine): Engine {
   const logStream = createWriteStream(logPath);
   const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: "1", CODE_EMBED_CACHE_DIR: m.cacheDir, CODE_EMBED_CONFIG_DIR: m.configDir };
   if (m.sharedHost === true) env.CODE_EMBED_SHARED_HOST = "1";
-  if (m.sharedHost === false) delete env.CODE_EMBED_SHARED_HOST;
+  if (m.sharedHost === false) env.CODE_EMBED_SHARED_HOST = "0";
   const child = spawn(m.exe, [m.cli, "serve"], {
     cwd: root,
     env,
@@ -543,7 +549,7 @@ async function runCombo(model: string, versionArg: string, cli: string, opts: Co
   const version = versionArg === "min" ? minVersionFromRange(
     (JSON.parse(readFileSync(extensionPkg, "utf8")) as { engines: { vscode: string } }).engines.vscode,
   ) : versionArg;
-  const hostWanted = sharedHost ?? process.env.CODE_EMBED_SHARED_HOST === "1";
+  const hostWanted = sharedHost ?? process.env.CODE_EMBED_SHARED_HOST !== "0";
   const hostLabel = sharedHost === null ? "" : sharedHost ? ", shared host" : ", own workers";
   const label = `${model} @ VS Code ${version}${projects > 1 ? ` x${projects} projects` : ""}${hostLabel}`;
   console.log(`\n=== ${label} ===`);
@@ -584,12 +590,19 @@ async function runCombo(model: string, versionArg: string, cli: string, opts: Co
   const enginePids = engines.map((e) => e.pid);
 
   let sampling = rssSupported;
+  const inference = { samples: 0, maxHostWorkers: 0, engineWorkers: new Set<number>() };
   const rssLoop = async () => {
     while (sampling) {
       try {
         const hostPid = findHostPid(cacheDir);
         const split = splitRss(await psSnapshot(), enginePids, hostPid);
         recordSample(m.peaks, split, hostPid, engines.map((e) => (e.latest ? toPhase(e.latest.phase) : null)));
+        if (hostWanted) {
+          const w = inferenceProcesses(await psCommands(), cli, hostPid, enginePids);
+          inference.samples++;
+          inference.maxHostWorkers = Math.max(inference.maxHostWorkers, w.hostWorkers);
+          for (const pid of w.engineWorkers) inference.engineWorkers.add(pid);
+        }
       } catch {
         // ps may fail transiently
       }
@@ -667,7 +680,22 @@ async function runCombo(model: string, versionArg: string, cli: string, opts: Co
     checks.push({
       name: "host-used",
       status: host ? "pass" : "fail",
-      detail: host ? `shared host pid ${host.pid}` : "CODE_EMBED_SHARED_HOST=1 but no host lock in the run's cache directory",
+      detail: host ? `shared host pid ${host.pid}` : "shared host expected but no host lock in the run's cache directory",
+    });
+    const problems: string[] = [];
+    if (inference.maxHostWorkers > 1)
+      problems.push(`${inference.maxHostWorkers} __embed-worker under the shared host in one sample (limit 1)`);
+    if (inference.engineWorkers.size > 0)
+      problems.push(`own __embed-worker under engine pid(s) ${[...inference.engineWorkers].join(", ")}`);
+    checks.push({
+      name: "inference-processes",
+      status: inference.samples === 0 ? "skip" : problems.length === 0 ? "pass" : "fail",
+      detail:
+        inference.samples === 0
+          ? "no ps samples taken"
+          : problems.length === 0
+            ? `${inference.samples} samples: at most ${inference.maxHostWorkers} __embed-worker under the host, none under engines`
+            : problems.join("; "),
     });
   }
   checks.push({
