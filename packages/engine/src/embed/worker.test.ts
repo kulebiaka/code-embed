@@ -7,7 +7,7 @@ import { DEFAULTS } from "../config/types";
 import { ProviderUnavailableError } from "../errors";
 import { getModel } from "./catalog";
 import type { Embedder } from "./types";
-import { createWorkerEmbedder, tsxExecArgv } from "./worker";
+import { createInferencePool, createWorkerEmbedder, tsxExecArgv, type InferencePool } from "./worker";
 
 const FIXTURE = fileURLToPath(new URL("./worker.fixture.ts", import.meta.url));
 const OPTS = { modelsDir: "/nonexistent", threads: 1 };
@@ -24,6 +24,7 @@ function expected(text: string): number[] {
 }
 
 const made: Embedder[] = [];
+const pools: InferencePool[] = [];
 const tmp: string[] = [];
 
 function make(env: Record<string, string> = {}, idleUnloadMs?: number): Embedder {
@@ -53,6 +54,7 @@ function spawns(file: string): number[] {
 
 afterEach(async () => {
   await Promise.all(made.splice(0).map((e) => e.dispose()));
+  await Promise.all(pools.splice(0).map((p) => p.dispose()));
   for (const d of tmp.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -204,5 +206,105 @@ describe("createWorkerEmbedder", () => {
 
   it("estimates tokens locally", () => {
     expect(make().countTokens("abcdefghi")).toBe(3);
+  });
+});
+
+describe("createInferencePool", () => {
+  const A = getModel("qwen3-embedding-0.6b");
+  const B = getModel("potion-code-16m");
+
+  function makePool(env: Record<string, string> = {}, idleUnloadMs?: number): InferencePool {
+    const p = createInferencePool({
+      modulePath: FIXTURE,
+      execArgv: tsxExecArgv(),
+      env: { ...process.env, ...env },
+      idleUnloadMs,
+      threads: 1,
+    });
+    pools.push(p);
+    return p;
+  }
+
+  function lines(file: string): string[] {
+    try {
+      return readFileSync(file, "utf8").split("\n").filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  it("serves two models from one child", async () => {
+    const spawnFile = spawnLog();
+    const loadFile = spawnLog();
+    const pool = makePool({ FIXTURE_SPAWN_LOG: spawnFile, FIXTURE_LOAD_LOG: loadFile });
+    const a = pool.embedder(A, OPTS);
+    const b = pool.embedder(B, OPTS);
+    const [va, vb] = await Promise.all([a.embedQueries(["one"]), b.embedQueries(["two"])]);
+    expect(Array.from(va[0]!)).toEqual(expected("one"));
+    expect(Array.from(vb[0]!)).toEqual(expected("two"));
+    expect(spawns(spawnFile)).toHaveLength(1);
+    expect(lines(loadFile).sort()).toEqual([`load ${A.id}`, `load ${B.id}`].sort());
+  });
+
+  it("lets a query of one model overtake a batch of another at a sub-request boundary", async () => {
+    const pool = makePool({ FIXTURE_BUSY_MS: "150" });
+    const a = pool.embedder(A, OPTS);
+    const b = pool.embedder(B, OPTS);
+    await Promise.all([a.init(), b.init()]);
+    const order: string[] = [];
+    const batch = b.embedDocuments(Array.from({ length: 40 }, (_, i) => `batch ${i}`)).then(() => order.push("batch"));
+    await sleep(50);
+    const query = a.embedQueries(["q"]).then(() => order.push("query"));
+    await Promise.all([batch, query]);
+    expect(order).toEqual(["query", "batch"]);
+  });
+
+  it("never has two requests in flight, loads included", async () => {
+    const overlap = spawnLog();
+    const pool = makePool({ FIXTURE_INFLIGHT_LOG: overlap, FIXTURE_LOAD_MS: "50", FIXTURE_BUSY_MS: "20" });
+    const a = pool.embedder(A, OPTS);
+    const b = pool.embedder(B, OPTS);
+    const docs = Array.from({ length: 30 }, (_, i) => `doc ${i}`);
+    await Promise.all([
+      a.embedDocuments(docs),
+      b.embedDocuments(docs),
+      a.embedQueries(["q1"]),
+      b.embedQueries(["q2"]),
+      b.init(),
+    ]);
+    expect(lines(overlap)).toEqual([]);
+  });
+
+  it("unloads each model separately and stops the child after the last one", async () => {
+    const spawnFile = spawnLog();
+    const loadFile = spawnLog();
+    const pool = makePool({ FIXTURE_SPAWN_LOG: spawnFile, FIXTURE_LOAD_LOG: loadFile }, 150);
+    const a = pool.embedder(A, OPTS);
+    const b = pool.embedder(B, OPTS);
+    await Promise.all([a.init(), b.init()]);
+    const [pid] = spawns(spawnFile);
+    for (let i = 0; i < 6; i++) {
+      await b.embedQueries(["keep"]);
+      await sleep(50);
+    }
+    expect(lines(loadFile)).toContain(`unload ${A.id}`);
+    expect(lines(loadFile)).not.toContain(`unload ${B.id}`);
+    expect(() => process.kill(pid!, 0)).not.toThrow();
+    const [v] = await b.embedQueries(["still"]);
+    expect(Array.from(v!)).toEqual(expected("still"));
+    await sleep(500);
+    expect(lines(loadFile)).toContain(`unload ${B.id}`);
+    expect(() => process.kill(pid!, 0)).toThrow();
+    await a.embedQueries(["again"]);
+    expect(spawns(spawnFile)).toHaveLength(2);
+  });
+
+  it("remembers the thread count for the next spawn without restarting", async () => {
+    const spawnFile = spawnLog();
+    const pool = makePool({ FIXTURE_SPAWN_LOG: spawnFile });
+    await pool.embedder(A, OPTS).init();
+    await pool.setThreads(3);
+    expect(pool.threads).toBe(3);
+    expect(spawns(spawnFile)).toHaveLength(1);
   });
 });

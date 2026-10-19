@@ -5,8 +5,9 @@ import { createLocalEmbedder, type LocalEmbedderOptions } from "./local";
 import type { Embedder } from "./types";
 
 export type WorkerRequest =
-  | { id: number; op: "init"; model: string; opts: LocalEmbedderOptions }
-  | { id: number; op: "embed"; kind: "query" | "document"; texts: string[] }
+  | { id: number; op: "load"; model: string; opts: LocalEmbedderOptions }
+  | { id: number; op: "embed"; model: string; kind: "query" | "document"; texts: string[] }
+  | { id: number; op: "unload"; model: string }
   | { id: number; op: "dispose" };
 
 export type WorkerResponse =
@@ -19,21 +20,31 @@ const defaultCreate: Create = (model, opts) => createLocalEmbedder(getModel(mode
 
 export function runEmbedWorker(create: Create = defaultCreate): Promise<void> {
   return new Promise((resolve) => {
-    let embedder: Embedder | undefined;
+    const embedders = new Map<string, Embedder>();
     let chain: Promise<void> = Promise.resolve();
 
     const handle = async (req: WorkerRequest): Promise<Float32Array[] | undefined> => {
-      if (req.op === "init") {
-        embedder = create(req.model, req.opts);
+      if (req.op === "load") {
+        if (embedders.has(req.model)) return undefined;
+        const embedder = create(req.model, req.opts);
         await embedder.init();
+        embedders.set(req.model, embedder);
+        return undefined;
+      }
+      if (req.op === "unload") {
+        const embedder = embedders.get(req.model);
+        embedders.delete(req.model);
+        await embedder?.dispose();
         return undefined;
       }
       if (req.op === "dispose") {
-        await embedder?.dispose();
-        embedder = undefined;
+        const all = [...embedders.values()];
+        embedders.clear();
+        await Promise.all(all.map((e) => e.dispose()));
         return undefined;
       }
-      if (!embedder) throw new Error("embedder not initialized");
+      const embedder = embedders.get(req.model);
+      if (!embedder) throw new Error(`model ${req.model} is not loaded`);
       return req.kind === "query" ? embedder.embedQueries(req.texts) : embedder.embedDocuments(req.texts);
     };
 
@@ -53,7 +64,9 @@ export function runEmbedWorker(create: Create = defaultCreate): Promise<void> {
 
     process.once("disconnect", () => {
       chain = chain
-        .then(() => embedder?.dispose())
+        .then(async () => {
+          await Promise.all([...embedders.values()].map((e) => e.dispose()));
+        })
         .catch(() => undefined)
         .then(resolve);
     });

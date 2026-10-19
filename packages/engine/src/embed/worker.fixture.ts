@@ -39,12 +39,30 @@ function embed(texts: string[]): Float32Array[] {
 
 if (process.env.FIXTURE_SPAWN_LOG) appendFileSync(process.env.FIXTURE_SPAWN_LOG, `${process.pid}\n`);
 
-const fake: Embedder = {
+const log = (file: string | undefined, line: string) => {
+  if (file) appendFileSync(file, `${line}\n`);
+};
+
+if (process.env.FIXTURE_INFLIGHT_LOG) {
+  let pending = 0;
+  const send = process.send?.bind(process);
+  process.on("message", () => {
+    if (++pending > 1) log(process.env.FIXTURE_INFLIGHT_LOG, "overlap");
+  });
+  if (send) {
+    process.send = ((...args: Parameters<typeof send>) => {
+      pending--;
+      return send(...args);
+    }) as typeof process.send;
+  }
+}
+
+const create = (model: string): Embedder => ({
   info: {
     provider: "local",
-    model: "fixture",
+    model,
     dims: FIXTURE_DIMS,
-    modelId: "fixture",
+    modelId: model,
     remote: false,
     maxInputTokens: 512,
     batchSize: 8,
@@ -52,11 +70,14 @@ const fake: Embedder = {
   async init() {
     if (process.env.FIXTURE_INIT_FAIL === "provider") throw new ProviderUnavailableError("fixture unavailable", 1234);
     if (process.env.FIXTURE_INIT_FAIL === "error") throw new Error("fixture init failed");
+    const ms = Number(process.env.FIXTURE_LOAD_MS) || 0;
+    if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+    log(process.env.FIXTURE_LOAD_LOG, `load ${model}`);
   },
   embedQueries: async (texts) => embed(texts),
   embedDocuments: async (texts) => embed(texts),
   countTokens: (t) => Math.ceil(t.length / 4),
-  dispose: async () => {},
-};
+  dispose: async () => log(process.env.FIXTURE_LOAD_LOG, `unload ${model}`),
+});
 
-void runEmbedWorker(() => fake).then(() => process.exit(0));
+void runEmbedWorker(create).then(() => process.exit(0));
