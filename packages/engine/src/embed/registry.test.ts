@@ -28,6 +28,7 @@ function settings(over: Partial<EffectiveSettings> = {}): EffectiveSettings {
     indexLocation: "project",
     maxFileKb: 512,
     threads: 2,
+    threadsExplicit: false,
     pauseOnBattery: false,
     exclude: [],
     searchMode: "hybrid",

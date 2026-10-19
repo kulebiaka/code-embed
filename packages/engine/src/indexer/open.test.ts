@@ -17,6 +17,7 @@ const testSettings: EffectiveSettings = {
   indexLocation: "project",
   maxFileKb: 512,
   threads: 1,
+  threadsExplicit: false,
   pauseOnBattery: false,
   exclude: [],
   searchMode: "hybrid",

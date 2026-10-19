@@ -21,15 +21,17 @@ function pick<T>(...vals: (T | undefined)[]): T | undefined {
 
 export function resolveSettings(src: SettingsSources): EffectiveSettings {
   const { cli = {}, project, editor = {}, user } = src;
+  const explicitThreads = pick(
+    ...[cli.threads, editor.index?.threads, user.index?.threads].map((n) => (n ? n : undefined)),
+  );
   const settings: EffectiveSettings = {
     indexLocation:
       pick(cli.indexLocation, project.index?.location, editor.index?.location, user.index?.location) ?? "auto",
     maxFileKb:
       pick(cli.maxFileKb, project.index?.max_file_kb, editor.index?.maxFileKb, user.index?.max_file_kb) ??
       DEFAULTS.maxFileKb,
-    threads:
-      pick(...[cli.threads, editor.index?.threads, user.index?.threads].map((n) => (n ? n : undefined))) ??
-      defaultThreads(),
+    threads: explicitThreads ?? defaultThreads(),
+    threadsExplicit: explicitThreads !== undefined,
     pauseOnBattery:
       pick(cli.pauseOnBattery, editor.index?.pauseOnBattery, user.index?.pause_on_battery) ?? false,
     exclude: pick(cli.exclude, project.exclude, editor.index?.exclude, user.exclude) ?? [],
