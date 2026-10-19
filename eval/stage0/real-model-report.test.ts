@@ -11,6 +11,7 @@ import {
   rssLimitMb,
   searchShares,
   splitRss,
+  strayInference,
   treeRss,
   type EngineObs,
   type HostObs,
@@ -313,10 +314,26 @@ describe("splitRss", () => {
     ]);
     recordSample(peaks, splitRss(e2, [10, 30], 20), 20, ["lexical", "idle"]);
     expect(peaks.hostKb).toBe(1000);
+    expect(peaks.totalKb).toBe(1670);
     expect(peaks.hostFirstPid).toBe(20);
     expect(peaks.hostPids).toEqual([20]);
     expect(peaks.engines[0]).toEqual({ treeKb: 670, engineKb: 600, childKb: 70, phase: "lexical" });
     expect(peaks.engines[1]).toEqual({ treeKb: 200, engineKb: 200, childKb: 0, phase: "idle" });
+  });
+});
+
+describe("strayInference", () => {
+  it("finds this run's host and workers by command line only", () => {
+    const cli = "/tmp/real-model-vsix-x/unpacked/extension/dist/engine/cli.js";
+    const ps = [
+      `  101 /Applications/Code Helper (Plugin) ${cli} __embed-host`,
+      `  102 /Applications/Code Helper (Plugin) ${cli} __embed-worker`,
+      `  103 /Applications/Code Helper (Plugin) ${cli} serve`,
+      `  104 /Applications/Code Helper (Plugin) /Users/me/.vscode/extensions/code-embed/dist/engine/cli.js __embed-worker`,
+      `  105 /bin/zsh -c grep __embed-host`,
+      "garbage",
+    ].join("\n");
+    expect(strayInference(ps, cli)).toEqual([101, 102]);
   });
 });
 

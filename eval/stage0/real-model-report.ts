@@ -74,6 +74,7 @@ export interface RssSplit {
 }
 
 export interface RssPeaks {
+  totalKb: number;
   hostKb: number;
   hostPids: number[];
   hostFirstPid: number | null;
@@ -142,6 +143,7 @@ export function splitRss(entries: PsEntry[], enginePids: number[], hostPid: numb
 
 export function newPeaks(engines: number): RssPeaks {
   return {
+    totalKb: 0,
     hostKb: 0,
     hostPids: [],
     hostFirstPid: null,
@@ -151,6 +153,8 @@ export function newPeaks(engines: number): RssPeaks {
 }
 
 export function recordSample(peaks: RssPeaks, split: RssSplit, hostPid: number | null, phases: (Phase | null)[]): void {
+  const total = (split.host?.totalKb ?? 0) + split.engines.reduce((s, t) => s + t.totalKb, 0);
+  if (total > peaks.totalKb) peaks.totalKb = total;
   if (split.host && hostPid !== null) {
     if (peaks.hostFirstPid === null) peaks.hostFirstPid = hostPid;
     peaks.hostPid = hostPid;
@@ -166,6 +170,16 @@ export function recordSample(peaks: RssPeaks, split: RssSplit, hostPid: number |
     }
     if (tree.childrenKb > p.childKb) p.childKb = tree.childrenKb;
   });
+}
+
+// ps -A -o pid=,command=; only processes started from this run's cli.js, so a real VS Code window's engine is never touched
+export function strayInference(psText: string, cli: string): number[] {
+  const out: number[] = [];
+  for (const line of psText.split(/\r?\n/)) {
+    const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+    if (m && m[2]!.includes(cli) && /\s__embed-(host|worker)(\s|$)/.test(m[2]!)) out.push(Number(m[1]));
+  }
+  return out;
 }
 
 export function rssLimitMb(model: string): number {
