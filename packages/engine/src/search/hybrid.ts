@@ -5,7 +5,7 @@ import { compileFilters, normalizeLang } from "./filters";
 import { rrfFuse } from "./fuse";
 import { lexicalCandidates } from "./lexical";
 import { routeWeights } from "./route";
-import { embedWithTimeout, type SearchContext } from "./types";
+import { embedBefore, embedDeadline, type SearchContext } from "./types";
 import { vectorCandidates } from "./vector";
 
 const DEFAULT_TOP = 20;
@@ -45,10 +45,10 @@ export async function search(ctx: SearchContext, params: SearchParams, signal?: 
     if (!useVectors || !ctx.embedder) return null;
     try {
       const embedder = ctx.embedder;
-      const r = await embedWithTimeout(ctx.embedTimeoutMs, signal, (s) => embedder.embedQueries([query], s));
+      const r = await embedBefore(embedDeadline(t0, ctx.embedTimeoutMs), signal, (s) => embedder.embedQueries([query], s));
       if (r.timedOut) {
         partial = true;
-        partialReason = `query embedding timed out after ${ctx.embedTimeoutMs} ms while indexing; lexical results only`;
+        partialReason = `query embedding timed out within the ${ctx.embedTimeoutMs} ms response budget while indexing; lexical results only`;
         return null;
       }
       const [qv] = r.value;

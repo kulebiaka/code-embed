@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openEmbCache } from "../cache/embcache";
 import type { EmbCache } from "../cache/types";
 import { FakeEmbedder } from "../embed/fake";
@@ -92,6 +92,7 @@ beforeEach(() => {
   };
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   store.close();
   cache.close();
   rmSync(dir, { recursive: true, force: true });
@@ -101,7 +102,7 @@ describe("findSimilar", () => {
   describe("embedding timeout while indexing", () => {
     const expectLexicalPartial = (r: Awaited<ReturnType<typeof findSimilar>>) => {
       expect(r.partial).toBe(true);
-      expect(r.partialReason).toBe("fragment embedding timed out after 50 ms while indexing; lexical results only");
+      expect(r.partialReason).toBe("fragment embedding timed out within the 50 ms response budget while indexing; lexical results only");
       expect(r.results.length).toBeGreaterThan(0);
       expect(r.results.every((x) => x.sources.join() === "lexical")).toBe(true);
     };
@@ -126,6 +127,55 @@ describe("findSimilar", () => {
         range: { startLine: 2, endLine: 2 },
       });
       expectLexicalPartial(r);
+    });
+
+    describe("budget counts from request start", () => {
+      const BUDGET = 400;
+      const spin = (ms: number) => {
+        const end = performance.now() + ms;
+        while (performance.now() < end);
+      };
+      const code = "function processPaymentRefund(order) { return gateway.refund(order.amount); }";
+
+      it("an embedding near the budget never yields a late full response", async () => {
+        await build();
+        const orig = store.getChunks.bind(store);
+        vi.spyOn(store, "getChunks").mockImplementation((ids) => (spin(20), orig(ids)));
+        for (const latencyMs of [250, 340, 360, 390, 420]) {
+          const t = performance.now();
+          const r = await findSimilar(ctx({ embedder: new FakeEmbedder({ dims: DIMS, latencyMs }), embedTimeoutMs: BUDGET }), {
+            code,
+            lang: "typescript",
+          });
+          const ms = performance.now() - t;
+          if (ms > BUDGET) expect(r.partialReason, `${latencyMs} ms embedding answered in ${ms} ms`).toMatch(/timed out/);
+          if (latencyMs >= BUDGET - 10) expect(r.partialReason).toMatch(/timed out/);
+          if (latencyMs <= 250) expect(r.results.every((x) => x.sources.join() === "semantic")).toBe(true);
+        }
+      });
+
+      it("time spent before the embedding is charged to the budget", async () => {
+        await build();
+        const orig = store.chunksForFile.bind(store);
+        vi.spyOn(store, "chunksForFile").mockImplementation((p) => (spin(150), orig(p)));
+        const t = performance.now();
+        const r = await findSimilar(ctx({ embedder: new FakeEmbedder({ dims: DIMS, latencyMs: 300 }), embedTimeoutMs: BUDGET }), {
+          path: "src/refund.ts",
+          range: { startLine: 2, endLine: 2 },
+        });
+        expect(performance.now() - t).toBeLessThan(BUDGET);
+        expect(r.partialReason).toMatch(/timed out/);
+        expect(r.results.every((x) => x.sources.join() === "lexical")).toBe(true);
+      });
+
+      it("a budget already spent skips the embedder", async () => {
+        await build();
+        const orig = store.chunksForFile.bind(store);
+        vi.spyOn(store, "chunksForFile").mockImplementation((p) => (spin(60), orig(p)));
+        const r = await findSimilar(ctx({ embedTimeoutMs: 50 }), { path: "src/refund.ts", range: { startLine: 2, endLine: 2 } });
+        expect(embedCalls).toEqual([]);
+        expect(r.partialReason).toMatch(/timed out/);
+      });
     });
 
     it("external abort rejects instead of returning partial", async () => {

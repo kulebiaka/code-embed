@@ -9,7 +9,7 @@ import { dequantizeInt8 } from "../store/quantize";
 import type { ChunkRecord } from "../store/types";
 import { compileFilters, normalizeLang } from "./filters";
 import { lexicalCandidates } from "./lexical";
-import { embedWithTimeout, type SearchContext } from "./types";
+import { embedBefore, embedDeadline, type SearchContext } from "./types";
 import { vectorCandidates } from "./vector";
 
 const DEFAULT_TOP = 10;
@@ -107,10 +107,10 @@ export async function findSimilar(
           { path, lang },
         );
         const embedder = ctx.embedder;
-        const r = await embedWithTimeout(ctx.embedTimeoutMs, signal, (s) => embedder.embedDocuments([doc], s));
+        const r = await embedBefore(embedDeadline(t0, ctx.embedTimeoutMs), signal, (s) => embedder.embedDocuments([doc], s));
         if (r.timedOut) {
           partial = true;
-          partialReason = `fragment embedding timed out after ${ctx.embedTimeoutMs} ms while indexing; lexical results only`;
+          partialReason = `fragment embedding timed out within the ${ctx.embedTimeoutMs} ms response budget while indexing; lexical results only`;
           useVectors = false;
         } else {
           [vec] = r.value;

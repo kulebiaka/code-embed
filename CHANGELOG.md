@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Search and "Find Similar" during indexing: the 800 ms budget now counts from the start of the request, not only the embedding step, so a response is either on time or marked `partial` with `timed out`.
 - Concurrent access to `emb.db` from several processes: `busy_timeout`, a retry of the WAL initialization when the database is busy, `BEGIN IMMEDIATE` on writes, and a non-blocking `last_used` update on reads.
 
 ## [0.1.0] - 2026-10-16
