@@ -63,7 +63,7 @@ pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts \
 
 Environment: `REAL_MODEL_REPORT_DIR` (default `eval/reports/real-model`), `CODE_EMBED_MODELS_DIR` (shared model directory; defaults to the engine cache), `VSCODE_TEST_CACHE` (VS Code cache, default `$TMPDIR/code-embed-vscode-test`). Each run uses temporary `CODE_EMBED_CACHE_DIR` (with a `models` link to the shared directory and an empty `emb.db`) and `CODE_EMBED_CONFIG_DIR`. If the installed VS Code does not start (for example, a broken signature), it is downloaded again. Exit code 0 means every check of every model × version combination is green.
 
-`--projects <n>` starts n engines (`cli serve`), one per project (`<tmp>/project-<i>`, each a copy of the fixture with its own `git init`). All of them share the run's `CODE_EMBED_CACHE_DIR` and `CODE_EMBED_CONFIG_DIR`, which stands for "one machine": the shared inference host key includes the models directory, so with the host on the engines connect to a single host. Every engine gets its own probes, log file and checks; the observation ends when all engines are indexed or the window is over. The host is enabled by `CODE_EMBED_SHARED_HOST=1` in the run's environment (passed to the engines); without it the old layout applies (an inference process per engine, `vector-slot/`) and the host checks are skipped.
+`--projects <n>` starts n engines (`cli serve`), one per project (`<tmp>/project-<i>`, each a copy of the fixture with its own `git init`). All of them share the run's `CODE_EMBED_CACHE_DIR` and `CODE_EMBED_CONFIG_DIR`, which stands for "one machine": the shared inference host key includes the models directory, so with the host on the engines connect to a single host. Every engine gets its own probes, log file and checks; the observation ends when all engines are indexed or the window is over. The host is on by default. `CODE_EMBED_SHARED_HOST=0` in the run's environment (passed to the engines) turns it off: the old layout applies (an inference process per engine, `vector-slot/`) and the host checks are skipped.
 
 Shared host accounting: the first engine starts the host (`cli.js __embed-host`) detached, so while that engine is alive the host is its child, and afterwards it is reparented to init. The host is found by the pid in `<cacheDir>/embed-host-*.lock` (it must be alive) on every RSS sample. Its tree (host + its inference process) is measured separately from the engine trees, and the host subtree is subtracted from the engine tree it hangs under, so nothing is counted twice. Without a host the accounting is the old one: the engine tree.
 
@@ -73,7 +73,7 @@ After the window every engine gets `index.pause`, the eval waits until every eng
 
 ### Comparison mode (`--compare`)
 
-Runs four combinations one after another with the same VS Code and model: 1 project and n projects (n = `--projects`, or 3 when it is 1), each first with own workers (`CODE_EMBED_SHARED_HOST` removed from the engines' environment) and then with the shared host (`CODE_EMBED_SHARED_HOST=1`); the variable in the eval's own environment is ignored. Each combination is a regular run with its own temporary cache directory and report (`…-own.json`, `…-host.json`, with `-p<n>` for several projects). Only the shared-host runs gate the exit code: with own workers and several projects `vector-slot/` lets one project index at a time, so their `progress` check fails by design and they serve as the baseline.
+Runs four combinations one after another with the same VS Code and model: 1 project and n projects (n = `--projects`, or 3 when it is 1), each first with own workers (`CODE_EMBED_SHARED_HOST=0` passed to the engines) and then with the shared host (`CODE_EMBED_SHARED_HOST=1`); the variable in the eval's own environment is ignored. Each combination is a regular run with its own temporary cache directory and report (`…-own.json`, `…-host.json`, with `-p<n>` for several projects). Only the shared-host runs gate the exit code: with own workers and several projects `vector-slot/` lets one project index at a time, so their `progress` check fails by design and they serve as the baseline.
 
 ```bash
 pnpm build
@@ -95,9 +95,10 @@ The result is `real-model-<model>-<vscode>-<platform>-<arch>-compare.json`: `row
 | `shutdown-host` | after the engines exit the eval sends the host `SIGTERM`; the host and every pid of its last observed tree are gone ≤ 10 s; `skip` without a host. Anything still alive is then `SIGKILL`ed |
 | `stress-indexed` | `stress/*` files are found by lexical search (stress fixture only) |
 | `host-used` | only when the host is enabled: a live host was found by its lock in the run's cache directory (otherwise the engines fell back to their own workers or joined someone else's host) |
+| `inference-processes` | only when the host is enabled: the `ps` samples (every 250 ms, as for RSS) show at most one `__embed-worker` under the host in any sample and none under an engine process; `skip` when nothing was sampled |
 | `leftover-processes` | after all shutdowns no `__embed-host` / `__embed-worker` process started from this run's `cli.js` is alive (found by command line in `ps`; any found are `SIGKILL`ed). The same sweep runs on `SIGINT`/`SIGTERM` of the eval |
 
-With `--projects` greater than 1 the per-engine checks are named `p<i>:<check>` (`p1:status-p95`, …); `rss`, `rss-host`, `shutdown-host` and `host-used`, `leftover-processes`, the host-restart failure (`no-crash`) are machine-wide and unprefixed. The status, lexical, hybrid, `findSimilar` and NR-07 thresholds are the same as for one project.
+With `--projects` greater than 1 the per-engine checks are named `p<i>:<check>` (`p1:status-p95`, …); `rss`, `rss-host`, `shutdown-host`, `host-used`, `inference-processes` and `leftover-processes`, the host-restart failure (`no-crash`) are machine-wide and unprefixed. The status, lexical, hybrid, `findSimilar` and NR-07 thresholds are the same as for one project.
 
 Thresholds are constants in `real-model-report.ts`; do not relax them when the result is red — that is a product defect.
 
@@ -113,10 +114,10 @@ The file `real-model-<model>-<vscode>-<platform>-<arch>.json` with `….engine.l
 - `checks[]`: a verdict per check (`pass` / `fail` / `skip`) with details; `ok` means zero failures.
 - `timeline`: indexing progress; `errors`: every `index.error` and `status.lastError`.
 
-Example, three projects on one machine (one shared host):
+Example, three projects on one machine (one shared host, the default):
 
 ```bash
-CODE_EMBED_SHARED_HOST=1 pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --projects 3
+pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --projects 3
 ```
 
 CI: the `real-model` job in `native-smoke.yml` (macos-14, ubuntu-22.04, windows-2022).
