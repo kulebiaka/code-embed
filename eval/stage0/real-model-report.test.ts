@@ -4,6 +4,7 @@ import {
   descendants,
   evaluate,
   allPassed,
+  inferenceProcesses,
   newPeaks,
   parsePs,
   percentile,
@@ -334,6 +335,42 @@ describe("strayInference", () => {
       "garbage",
     ].join("\n");
     expect(strayInference(ps, cli)).toEqual([101, 102]);
+  });
+});
+
+describe("inferenceProcesses", () => {
+  const cli = "/tmp/real-model-x/cli.js";
+  const row = (pid: number, ppid: number, command: string) => `  ${pid} ${ppid} ${command}`;
+  const engineA = row(10, 1, `/Code Helper ${cli} serve`);
+  const host = row(11, 10, `/Code Helper ${cli} __embed-host`);
+  const hostWorker = row(12, 11, `/Code Helper ${cli} __embed-worker`);
+  const engineB = row(20, 1, `/Code Helper ${cli} serve`);
+  const engineWorker = row(21, 20, `/Code Helper ${cli} __embed-worker`);
+  const foreignWorker = row(22, 20, "/Code Helper /other/cli.js __embed-worker");
+
+  it("counts one worker under the host and none under engines as ok", () => {
+    const ps = [engineA, host, hostWorker, engineB].join("\n");
+    expect(inferenceProcesses(ps, cli, 11, [10, 20])).toEqual({ hostWorkers: 1, engineWorkers: [] });
+  });
+
+  it("counts every worker under the host", () => {
+    const ps = [engineA, host, hostWorker, row(13, 11, `/Code Helper ${cli} __embed-worker`)].join("\n");
+    expect(inferenceProcesses(ps, cli, 11, [10]).hostWorkers).toBe(2);
+  });
+
+  it("reports a worker under an engine, but not the host's own worker under its parent engine", () => {
+    const ps = [engineA, host, hostWorker, engineB, engineWorker].join("\n");
+    expect(inferenceProcesses(ps, cli, 11, [10, 20])).toEqual({ hostWorkers: 1, engineWorkers: [21] });
+  });
+
+  it("ignores workers of other cli.js files", () => {
+    const ps = [engineA, host, engineB, foreignWorker].join("\n");
+    expect(inferenceProcesses(ps, cli, 11, [10, 20])).toEqual({ hostWorkers: 0, engineWorkers: [] });
+  });
+
+  it("without a host every worker under an engine is reported", () => {
+    const ps = [engineA, host, hostWorker].join("\n");
+    expect(inferenceProcesses(ps, cli, null, [10])).toEqual({ hostWorkers: 0, engineWorkers: [12] });
   });
 });
 
