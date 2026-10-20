@@ -141,4 +141,4 @@ The measurements show the host costs ~190 MB and no query latency, but they do n
 4. Changes 4 and 5 (`config.toml` sync, fallback through `vector-slot/`).
 5. Change 6 and 7 (default on, `bye`), docs, `real-model --compare --warm` on darwin-arm64 and in the CI `real-model` job.
 
-> Note: the implementation follows the user's decisions (answers.md, Q-01): the minimum-explicit `threads` rule, one multi-model child process, and the host key by `modelsDir` only. The section above is kept as the original plan.
+> Note: the implementation follows the user's decisions (Q-01): the minimum-explicit `threads` rule, one multi-model child process, and the host key by `modelsDir` only. The section above is kept as the original plan.
