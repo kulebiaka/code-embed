@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { initHashing } from "../util/hash";
-import { createBatchQueue, decodeVector, encodeVector, hostKey, type HostClient } from "./host";
+import { createBatchQueue, decodeVector, effectiveThreads, encodeVector, hostKey, type HostClient } from "./host";
 
 const client = (active = true): HostClient => ({ active, served: 0 });
 
@@ -112,11 +112,32 @@ describe("vector encoding", () => {
 describe("hostKey", () => {
   beforeAll(() => initHashing());
 
-  it("differs by model and threads", () => {
-    const base = { model: "m", opts: { modelsDir: "/m", threads: 2 } };
-    const key = hostKey(base);
-    expect(hostKey({ ...base })).toBe(key);
-    expect(hostKey({ ...base, opts: { ...base.opts, threads: 4 } })).not.toBe(key);
-    expect(hostKey({ ...base, model: "other" })).not.toBe(key);
+  it("depends on modelsDir only", () => {
+    const key = hostKey({ modelsDir: "/m" });
+    expect(hostKey({ modelsDir: "/m", idleExitMs: 5, idleUnloadMs: 1, worker: { modulePath: "x", execArgv: [] } })).toBe(key);
+    expect(hostKey({ modelsDir: "/other" })).not.toBe(key);
+  });
+});
+
+describe("effectiveThreads", () => {
+  const c = (clientId: string, threads: number, threadsExplicit: boolean) => ({ clientId, threads, threadsExplicit });
+
+  it("takes the minimum of explicit values", () => {
+    expect(effectiveThreads([c("a", 4, true), c("b", 2, true), c("c", 3, true)], 8)).toEqual({ threads: 2, from: "b" });
+  });
+
+  it("never lets an automatic value override an explicit one", () => {
+    expect(effectiveThreads([c("a", 4, true), c("b", 1, false)], 8)).toEqual({ threads: 4, from: "a" });
+  });
+
+  it("falls back to the default without explicit values", () => {
+    expect(effectiveThreads([c("a", 1, false)], 3)).toEqual({ threads: 3, from: "default" });
+    expect(effectiveThreads([], 3)).toEqual({ threads: 3, from: "default" });
+  });
+
+  it("is recomputed when a client leaves", () => {
+    const all = [c("a", 4, true), c("b", 2, true)];
+    expect(effectiveThreads(all, 8).threads).toBe(2);
+    expect(effectiveThreads(all.slice(0, 1), 8)).toEqual({ threads: 4, from: "a" });
   });
 });

@@ -15,17 +15,18 @@ import { cacheDir, embedHostSocketPath } from "../core/paths";
 import { blake3Hex, initHashing } from "../util/hash";
 import { log } from "../util/log";
 import { probeSocket } from "../util/socket";
+import { defaultThreads } from "../config/resolve";
 import { getModel } from "./catalog";
-import type { LocalEmbedderOptions } from "./local";
-import { createWorkerEmbedder } from "./worker";
+import { createLocalEmbedder } from "./local";
+import type { Embedder } from "./types";
+import { createInferencePool } from "./worker";
 
-export const HOST_PROTOCOL_VERSION = 1;
+export const HOST_PROTOCOL_VERSION = 2;
 const IDLE_EXIT_MS = 10 * 60_000;
 const EMBED_ERROR = -32000;
 
 export interface EmbedHostConfig {
-  model: string;
-  opts: LocalEmbedderOptions;
+  modelsDir: string;
   // tests replace the inference child and shorten the timers
   worker?: { modulePath: string; execArgv: string[] };
   idleUnloadMs?: number;
@@ -36,6 +37,9 @@ export interface HelloParams {
   protocolVersion: number;
   modelId: string;
   threads: number;
+  threadsExplicit: boolean;
+  offlineArchive?: string;
+  proxy?: string;
   clientId: string;
   project?: string;
   active: boolean;
@@ -65,7 +69,7 @@ export interface EmbedErrorData {
 
 // Engine version is part of the key so that an updated extension or CLI never talks to an old host.
 export function hostKey(cfg: EmbedHostConfig): string {
-  return blake3Hex(JSON.stringify([HOST_PROTOCOL_VERSION, pkg.version, cfg])).slice(0, 16);
+  return blake3Hex(JSON.stringify([HOST_PROTOCOL_VERSION, pkg.version, cfg.modelsDir])).slice(0, 16);
 }
 
 export function hostLockName(key: string): string {
@@ -151,6 +155,17 @@ export function createBatchQueue(): BatchQueue {
   };
 }
 
+export function effectiveThreads(
+  clients: Iterable<{ clientId: string; threads: number; threadsExplicit: boolean }>,
+  fallback: number,
+): { threads: number; from: string } {
+  let best: { threads: number; from: string } | undefined;
+  for (const c of clients) {
+    if (c.threadsExplicit && (!best || c.threads < best.threads)) best = { threads: c.threads, from: c.clientId };
+  }
+  return best ?? { threads: fallback, from: "default" };
+}
+
 function toResponseError(err: unknown): ResponseError<EmbedErrorData> {
   const e = err instanceof Error ? err : new Error(String(err));
   const retryAfterMs = (e as { retryAfterMs?: number }).retryAfterMs;
@@ -169,13 +184,26 @@ export async function runEmbedHost(cfg: EmbedHostConfig): Promise<void> {
     return;
   }
 
-  const worker = createWorkerEmbedder(getModel(cfg.model), cfg.opts, {
+  const fallbackThreads = defaultThreads();
+  const pool = createInferencePool({
     modulePath: cfg.worker?.modulePath,
     execArgv: cfg.worker?.execArgv,
     idleUnloadMs: cfg.idleUnloadMs,
+    threads: fallbackThreads,
   });
   const queue = createBatchQueue();
   const clients = new Set<Socket>();
+  const greeted = new Map<Socket, { clientId: string; threads: number; threadsExplicit: boolean }>();
+  const embedders = new Map<string, Embedder>();
+  let appliedThreads: number | undefined;
+
+  const recomputeThreads = () => {
+    const { threads, from } = effectiveThreads(greeted.values(), fallbackThreads);
+    if (threads === appliedThreads) return;
+    appliedThreads = threads;
+    log.info(`effective threads ${threads} (from ${from})`);
+    pool.setThreads(threads).catch((err: unknown) => log.warn(`setThreads failed: ${err instanceof Error ? err.message : err}`));
+  };
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let stop: () => Promise<void> = async () => {};
@@ -190,14 +218,14 @@ export async function runEmbedHost(cfg: EmbedHostConfig): Promise<void> {
     }, cfg.idleExitMs ?? IDLE_EXIT_MS);
   };
 
-  const embed = (p: EmbedParams, signal: AbortSignal) =>
-    p.kind === "query" ? worker.embedQueries(p.texts, signal) : worker.embedDocuments(p.texts, signal);
+  const embed = (e: Embedder, p: EmbedParams, signal: AbortSignal) =>
+    p.kind === "query" ? e.embedQueries(p.texts, signal) : e.embedDocuments(p.texts, signal);
 
   const isUnix = process.platform !== "win32";
   const other = await probeSocket(sock, 200);
   if (other) {
     other.destroy();
-    await worker.dispose();
+    await pool.dispose();
     lock.release();
     log.info(`embedding host ${key} is already listening`);
     return;
@@ -214,31 +242,53 @@ export async function runEmbedHost(cfg: EmbedHostConfig): Promise<void> {
     const conn = createMessageConnection(new StreamMessageReader(socket), new StreamMessageWriter(socket));
     const client: HostClient = { active: true, served: 0 };
     const aborts = new Set<AbortController>();
-    let greeted = false;
+    let embedder: Embedder | undefined;
 
     conn.onRequest("hello", (p: HelloParams): HelloResult => {
-      if (p.protocolVersion !== HOST_PROTOCOL_VERSION || p.modelId !== cfg.model || p.threads !== cfg.opts.threads) {
+      if (p.protocolVersion !== HOST_PROTOCOL_VERSION) {
         throw new ResponseError(
           ErrorCodes.InvalidRequest,
-          `embedding host serves ${cfg.model} with ${cfg.opts.threads} threads, protocol ${HOST_PROTOCOL_VERSION}`,
+          `embedding host speaks protocol ${HOST_PROTOCOL_VERSION}, client sent ${p.protocolVersion}`,
         );
       }
-      greeted = true;
+      let entry;
+      try {
+        entry = getModel(p.modelId);
+      } catch (err) {
+        throw new ResponseError(ErrorCodes.InvalidRequest, err instanceof Error ? err.message : String(err));
+      }
+      if (entry.pooling === "static") {
+        throw new ResponseError(
+          ErrorCodes.InvalidRequest,
+          `model ${p.modelId} is static and runs in the engine process, not in the embedding host`,
+        );
+      }
+      const loadOpts = { modelsDir: cfg.modelsDir, threads: pool.threads, offlineArchive: p.offlineArchive, proxy: p.proxy };
+      let e = embedders.get(entry.id);
+      if (!e) {
+        e = pool.embedder(entry, loadOpts);
+        embedders.set(entry.id, e);
+      }
+      embedder = e;
       client.active = p.active;
+      greeted.set(socket, { clientId: p.clientId, threads: p.threads, threadsExplicit: p.threadsExplicit });
       log.info(`client ${p.clientId} connected${p.project ? ` (${p.project})` : ""}`);
-      return { dims: worker.info.dims, maxTokens: worker.info.maxInputTokens };
+      recomputeThreads();
+      const { dims, maxInputTokens } = createLocalEmbedder(entry, loadOpts).info;
+      return { dims, maxTokens: maxInputTokens };
     });
     conn.onNotification("activity", (p: { active: boolean }) => {
       client.active = p.active;
     });
     conn.onRequest("embed", async (p: EmbedParams, token): Promise<EmbedResult> => {
-      if (!greeted) throw new ResponseError(ErrorCodes.InvalidRequest, "hello is required first");
+      if (!embedder) throw new ResponseError(ErrorCodes.InvalidRequest, "hello is required first");
       const ac = new AbortController();
       aborts.add(ac);
       const sub = token.onCancellationRequested(() => ac.abort(new Error("cancelled")));
+      const e = embedder;
       try {
         const vecs =
-          p.prio === "batch" ? await queue.run(client, () => embed(p, ac.signal), ac.signal) : await embed(p, ac.signal);
+          p.prio === "batch" ? await queue.run(client, () => embed(e, p, ac.signal), ac.signal) : await embed(e, p, ac.signal);
         return { vectors: vecs.map(encodeVector) };
       } catch (err) {
         throw toResponseError(err);
@@ -250,6 +300,7 @@ export async function runEmbedHost(cfg: EmbedHostConfig): Promise<void> {
 
     socket.once("close", () => {
       clients.delete(socket);
+      if (greeted.delete(socket)) recomputeThreads();
       for (const ac of aborts) ac.abort(new Error("client disconnected"));
       conn.dispose();
       armIdle();
@@ -266,12 +317,12 @@ export async function runEmbedHost(cfg: EmbedHostConfig): Promise<void> {
       });
     });
   } catch (err) {
-    await worker.dispose();
+    await pool.dispose();
     lock.release();
     throw err;
   }
   if (isUnix) chmodSync(sock, 0o600);
-  log.info(`embedding host listening on ${sock} (pid ${process.pid}, model ${cfg.model}, ${cfg.opts.threads} threads)`);
+  log.info(`embedding host listening on ${sock} (pid ${process.pid}, models in ${cfg.modelsDir})`);
   armIdle();
 
   return new Promise<void>((resolve) => {
@@ -286,7 +337,7 @@ export async function runEmbedHost(cfg: EmbedHostConfig): Promise<void> {
         const closed = new Promise<void>((r) => server.close(() => r()));
         for (const c of clients) c.destroy();
         await closed;
-        await worker.dispose();
+        await pool.dispose();
         if (isUnix) rmSync(sock, { force: true });
         lock.release();
         resolve();

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:net";
+import { connect, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,8 +17,8 @@ import { isProcessAlive } from "../core/lock";
 import { embedHostSocketPath } from "../core/paths";
 import { ProviderUnavailableError } from "../errors";
 import { initHashing } from "../util/hash";
-import { getModel } from "./catalog";
-import { hostKey } from "./host";
+import { getModel, loadManifest } from "./catalog";
+import { HOST_PROTOCOL_VERSION, hostKey, type HelloParams, type HelloResult } from "./host";
 import { createHostEmbedder, type HostEmbedderOptions } from "./host-client";
 import type { Embedder } from "./types";
 import { tsxExecArgv } from "./worker";
@@ -57,13 +57,7 @@ function make(env: Record<string, string> = {}, o: HostEmbedderOptions = {}): Em
 
 function hostSocket(): string {
   return embedHostSocketPath(
-    hostKey({
-      model: DEFAULTS.model,
-      opts: { modelsDir: join(dir, "models"), threads: 1 },
-      worker: { modulePath: FIXTURE, execArgv: tsxExecArgv() },
-      idleUnloadMs: undefined,
-      idleExitMs: undefined,
-    }),
+    hostKey({ modelsDir: join(dir, "models") }),
   );
 }
 
@@ -294,6 +288,65 @@ describe("createHostEmbedder", () => {
     vs.forEach((v, i) => expect(vec(v)).toEqual(vec(fakeVector(texts[i]!))));
     expect(a.shared).toBe(false);
     expect(spawns()).toHaveLength(1);
+  });
+
+  describe("hello", () => {
+    const hostLog = () => {
+      const dirLogs = join(cache, "logs");
+      return readdirSync(dirLogs)
+        .filter((n) => n.startsWith("embed-host-"))
+        .map((n) => readFileSync(join(dirLogs, n), "utf8"))
+        .join("\n");
+    };
+
+    async function rawHello(p: Partial<HelloParams>) {
+      const socket = connect(hostSocket());
+      await new Promise<void>((r, j) => socket.once("connect", r).once("error", j));
+      const conn = createMessageConnection(new StreamMessageReader(socket), new StreamMessageWriter(socket));
+      conn.listen();
+      try {
+        return await conn.sendRequest<HelloResult>("hello", {
+          protocolVersion: HOST_PROTOCOL_VERSION,
+          modelId: DEFAULTS.model,
+          threads: 1,
+          threadsExplicit: false,
+          clientId: "raw",
+          active: true,
+          ...p,
+        } satisfies HelloParams);
+      } finally {
+        conn.dispose();
+        socket.destroy();
+      }
+    }
+
+    it("accepts another model and other threads, and answers dims without loading", async () => {
+      const a = make();
+      await a.init();
+      const other = loadManifest().models.find((m) => m.id !== DEFAULTS.model && m.pooling !== "static")!;
+      const r = await rawHello({ modelId: other.id, threads: 3, threadsExplicit: true });
+      expect(r.dims).toBe(other.dims);
+      expect(spawns()).toHaveLength(0);
+    });
+
+    it("rejects an unknown model, a static model and a foreign protocol", async () => {
+      const a = make();
+      await a.init();
+      const stat = loadManifest().models.find((m) => m.pooling === "static")!;
+      await expect(rawHello({ modelId: stat.id })).rejects.toThrow(/is static and runs in the engine process/);
+      await expect(rawHello({ modelId: "nope" })).rejects.toThrow(/unknown model/);
+      await expect(rawHello({ protocolVersion: 1 })).rejects.toThrow(/speaks protocol 2, client sent 1/);
+    });
+
+    it("logs the effective threads on hello and when a client leaves", async () => {
+      const a = make({}, { threadsExplicit: true });
+      await a.init();
+      expect(hostLog()).toMatch(/effective threads 1 \(from \d+-\d+\)/);
+      await rawHello({ threads: 1, threadsExplicit: false });
+      await a.dispose();
+      await sleep(300);
+      expect(hostLog()).toMatch(/effective threads \d+ \(from default\)/);
+    });
   });
 
   it("loads the model on the first request, not on connect", async () => {
