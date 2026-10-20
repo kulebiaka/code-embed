@@ -19,7 +19,7 @@ import { ProviderUnavailableError } from "../errors";
 import { initHashing } from "../util/hash";
 import { getModel, loadManifest } from "./catalog";
 import { HOST_PROTOCOL_VERSION, hostKey, type HelloParams, type HelloResult } from "./host";
-import { createHostEmbedder, type HostEmbedderOptions } from "./host-client";
+import { createHostEmbedder, sharedHostEnabled, type HostEmbedderOptions } from "./host-client";
 import type { Embedder } from "./types";
 import { tsxExecArgv } from "./worker";
 
@@ -41,10 +41,15 @@ let cache: string;
 let spawnLog: string;
 const made: Embedder[] = [];
 
-function make(env: Record<string, string> = {}, o: HostEmbedderOptions = {}): Embedder {
+function make(
+  env: Record<string, string> = {},
+  o: HostEmbedderOptions = {},
+  entry = getModel(DEFAULTS.model),
+  threads = 1,
+): Embedder {
   const e = createHostEmbedder(
-    getModel(DEFAULTS.model),
-    { modelsDir: join(dir, "models"), threads: 1 },
+    entry,
+    { modelsDir: join(dir, "models"), threads },
     {
       env: { ...process.env, CODE_EMBED_CACHE_DIR: cache, FIXTURE_SPAWN_LOG: spawnLog, ...env },
       worker: { modulePath: FIXTURE, execArgv: tsxExecArgv() },
@@ -133,6 +138,32 @@ describe("createHostEmbedder", () => {
     expect(spawns()).toHaveLength(1);
     expect(hostPids()).toHaveLength(1);
     expect(a.shared).toBe(true);
+  });
+
+  it("serves clients with different models and threads from one host and one child", async () => {
+    const other = loadManifest().models.find((m) => m.id !== DEFAULTS.model && m.pooling !== "static")!;
+    const a = make({}, { threadsExplicit: true }, getModel(DEFAULTS.model), 2);
+    const b = make({}, {}, getModel(other.id), 4);
+    await Promise.all([a.embedQueries(["x"]), b.embedQueries(["y"])]);
+    expect(a.shared).toBe(true);
+    expect(b.shared).toBe(true);
+    expect(hostPids()).toHaveLength(1);
+    expect(spawns()).toHaveLength(1);
+  });
+
+  it("disables the shared host only when CODE_EMBED_SHARED_HOST is 0", async () => {
+    const saved = process.env.CODE_EMBED_SHARED_HOST;
+    process.env.CODE_EMBED_SHARED_HOST = "0";
+    try {
+      expect(sharedHostEnabled()).toBe(false);
+      process.env.CODE_EMBED_SHARED_HOST = "1";
+      expect(sharedHostEnabled()).toBe(true);
+      delete process.env.CODE_EMBED_SHARED_HOST;
+      expect(sharedHostEnabled()).toBe(true);
+    } finally {
+      if (saved === undefined) delete process.env.CODE_EMBED_SHARED_HOST;
+      else process.env.CODE_EMBED_SHARED_HOST = saved;
+    }
   });
 
   it("starts a single host when clients race", async () => {

@@ -46,7 +46,7 @@ export async function resolveEmbedder(opts: ResolveEmbedderOptions): Promise<Emb
     if (entry.pooling === "static") return withQueryCache(createLocalEmbedder(entry, localOpts));
     return withQueryCache(
       sharedHostEnabled()
-        ? createHostEmbedder(entry, localOpts, { project: root })
+        ? createHostEmbedder(entry, localOpts, { project: root, threadsExplicit: settings.threadsExplicit })
         : createWorkerEmbedder(entry, localOpts),
     );
   }

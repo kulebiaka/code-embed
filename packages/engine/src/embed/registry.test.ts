@@ -76,8 +76,8 @@ describe("isLoopbackUrl", () => {
 });
 
 describe("resolveEmbedder", () => {
-  it.each([undefined, "0", ""])("runs transformer models in the inference worker when CODE_EMBED_SHARED_HOST is %j", async (v) => {
-    if (v !== undefined) process.env.CODE_EMBED_SHARED_HOST = v;
+  it("runs transformer models in a private worker when CODE_EMBED_SHARED_HOST is 0", async () => {
+    process.env.CODE_EMBED_SHARED_HOST = "0";
     vi.mocked(createWorkerEmbedder).mockReturnValue(new FakeEmbedder());
     await resolveEmbedder({ root: "/p", settings: settings() });
     expect(vi.mocked(createWorkerEmbedder).mock.calls[0]![0].id).toBe(DEFAULTS.model);
@@ -85,13 +85,19 @@ describe("resolveEmbedder", () => {
     expect(createHostEmbedder).not.toHaveBeenCalled();
   });
 
-  it("uses the shared inference host when CODE_EMBED_SHARED_HOST is 1", async () => {
-    process.env.CODE_EMBED_SHARED_HOST = "1";
+  it.each([undefined, "1"])("uses the shared inference host when CODE_EMBED_SHARED_HOST is %j", async (v) => {
+    if (v !== undefined) process.env.CODE_EMBED_SHARED_HOST = v;
     vi.mocked(createHostEmbedder).mockReturnValue(new FakeEmbedder());
     await resolveEmbedder({ root: "/p", settings: settings() });
     expect(vi.mocked(createHostEmbedder).mock.calls[0]![0].id).toBe(DEFAULTS.model);
-    expect(vi.mocked(createHostEmbedder).mock.calls[0]![2]).toEqual({ project: "/p" });
+    expect(vi.mocked(createHostEmbedder).mock.calls[0]![2]).toEqual({ project: "/p", threadsExplicit: false });
     expect(createWorkerEmbedder).not.toHaveBeenCalled();
+  });
+
+  it("passes threadsExplicit to the host", async () => {
+    vi.mocked(createHostEmbedder).mockReturnValue(new FakeEmbedder());
+    await resolveEmbedder({ root: "/p", settings: settings({ threadsExplicit: true }) });
+    expect(vi.mocked(createHostEmbedder).mock.calls[0]![2]).toEqual({ project: "/p", threadsExplicit: true });
   });
 
   it.each([undefined, "0", "1"])("keeps static models in process when CODE_EMBED_SHARED_HOST is %j", async (v) => {

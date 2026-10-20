@@ -50,7 +50,7 @@ const PROBE_MS = 200;
 let nextClient = 0;
 
 export function sharedHostEnabled(): boolean {
-  return process.env.CODE_EMBED_SHARED_HOST === "1";
+  return process.env.CODE_EMBED_SHARED_HOST !== "0";
 }
 
 function hostEntry(): { modulePath: string; args: string[]; execArgv: string[] } {
@@ -117,7 +117,7 @@ export function createHostEmbedder(entry: ModelEntry, opts: LocalEmbedderOptions
   let disposed = false;
 
   const useFallback = (reason: string) => {
-    log.warn(`${reason}; using a private inference process`);
+    log.warn(`${reason}; using a private inference process (the machine-wide thread limit does not apply to it)`);
     fallback = createWorkerEmbedder(entry, opts, {
       modulePath: o.worker?.modulePath,
       execArgv: o.worker?.execArgv,
