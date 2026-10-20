@@ -299,12 +299,65 @@ describe("createInferencePool", () => {
     expect(spawns(spawnFile)).toHaveLength(2);
   });
 
-  it("remembers the thread count for the next spawn without restarting", async () => {
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it("restarts the child only after the in-flight request, running queued jobs in the new child", async () => {
+    const spawnFile = spawnLog();
+    const pool = makePool({ FIXTURE_SPAWN_LOG: spawnFile, FIXTURE_BUSY_MS: "400" });
+    const a = pool.embedder(A, OPTS);
+    await a.init();
+    const [oldPid] = spawns(spawnFile);
+    const inflight = a.embedQueries(["one"]);
+    await sleep(100);
+    const restart = pool.setThreads(3);
+    const queued = a.embedQueries(["two"]);
+    expect(pool.threads).toBe(1);
+    expect(await inflight).toHaveLength(1);
+    await restart;
+    expect(alive(oldPid!)).toBe(false);
+    expect(pool.threads).toBe(3);
+    expect(await queued).toHaveLength(1);
+    const pids = spawns(spawnFile);
+    expect(pids).toHaveLength(2);
+    expect(pids[1]).not.toBe(oldPid);
+  });
+
+  it("never has two children alive and restarts once with the last value", async () => {
+    const spawnFile = spawnLog();
+    const pool = makePool({ FIXTURE_SPAWN_LOG: spawnFile, FIXTURE_BUSY_MS: "300" });
+    const a = pool.embedder(A, OPTS);
+    await a.init();
+    const [oldPid] = spawns(spawnFile);
+    const inflight = a.embedQueries(["one"]);
+    await sleep(100);
+    const r1 = pool.setThreads(2);
+    const r2 = pool.setThreads(5);
+    const queued = a.embedQueries(["two"]);
+    await Promise.all([inflight, r1, r2]);
+    expect(alive(oldPid!)).toBe(false);
+    await queued;
+    expect(pool.threads).toBe(5);
+    const pids = spawns(spawnFile);
+    expect(pids).toHaveLength(2);
+    expect(alive(pids[0]!)).toBe(false);
+  });
+
+  it("does nothing for the current value and applies immediately without a child", async () => {
     const spawnFile = spawnLog();
     const pool = makePool({ FIXTURE_SPAWN_LOG: spawnFile });
-    await pool.embedder(A, OPTS).init();
-    await pool.setThreads(3);
-    expect(pool.threads).toBe(3);
+    await pool.setThreads(1);
+    await pool.setThreads(4);
+    expect(pool.threads).toBe(4);
+    await pool.embedder(A, OPTS).embedQueries(["x"]);
+    expect(spawns(spawnFile)).toHaveLength(1);
+    await pool.setThreads(4);
     expect(spawns(spawnFile)).toHaveLength(1);
   });
 });
