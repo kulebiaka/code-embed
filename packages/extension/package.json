@@ -299,7 +299,7 @@
             "default": 0,
             "minimum": 0,
             "scope": "application",
-            "description": "Total threads for the local embedding model across all windows and projects on this machine (0 = automatic: half of the cores, at most 4).",
+            "description": "Hard limit on threads used by local models on this machine, shared by all VS Code windows, the CLI and MCP (0 = automatic: half of the cores, at most 4). If windows or the CLI set different values, the smallest one applies",
             "order": 3
           },
           "codeEmbed.index.pauseOnBattery": {

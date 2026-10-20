@@ -826,7 +826,7 @@ export function createSettingsApp(root: HTMLElement, host: HostApi): SettingsApp
       renderPatterns();
     }).root,
     numberField("index.maxFileKb", "Maximum file size", "Larger files are skipped.", 1, { suffix: "KB" }),
-    numberField("index.threads", "Threads", "Total threads for the built-in model across all windows and projects on this machine. Leave empty for automatic: half of the cores, at most 4.", 1, { auto: true }),
+    numberField("index.threads", "Threads", "Hard limit on threads used by local models on this machine, shared by all VS Code windows, the CLI and MCP (0 = automatic: half of the cores, at most 4). If windows or the CLI set different values, the smallest one applies", 1, { auto: true }),
   );
   const batteryBox = el("label", "check-row");
   const battery = el("input");

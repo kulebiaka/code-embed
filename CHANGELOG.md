@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- Opt-in shared inference process per machine (`CODE_EMBED_SHARED_HOST=1`): one copy of the local model serves all windows, daemons, MCP servers and CLI runs, and projects index interleaved instead of queueing.
+- Shared inference host, on by default (`CODE_EMBED_SHARED_HOST=0` turns it off): one host per machine serves the local models for all windows, daemons, MCP servers and CLI runs, projects index interleaved instead of queueing, and `codeEmbed.index.threads` is one thread limit shared by all of them.
 
 ### Fixed
 
