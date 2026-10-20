@@ -147,6 +147,7 @@ describe("resolveSettings", () => {
       provider: "local",
       model: "qwen3-embedding-0.6b",
       threads: Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2))),
+      threadsExplicit: false,
       pauseOnBattery: false,
       exclude: [],
       allowRemote: false,
@@ -173,8 +174,14 @@ describe("resolveSettings", () => {
     [
       "zero threads means automatic",
       { project: {}, editor: { index: { threads: 0 } }, user: { index: { threads: 3 } } },
-      { threads: 3 },
+      { threads: 3, threadsExplicit: true },
     ],
+    ["cli threads are explicit", { cli: { threads: 5 }, project: {}, user: {} }, { threads: 5, threadsExplicit: true }],
+    ["editor threads are explicit", { project: {}, editor: { index: { threads: 7 } }, user: {} }, { threads: 7, threadsExplicit: true }],
+    ["config.toml threads are explicit", { project: {}, user: { index: { threads: 3 } } }, { threads: 3, threadsExplicit: true }],
+    ["zero threads are not explicit", { project: {}, editor: { index: { threads: 0 } }, user: { index: { threads: 0 } } }, { threadsExplicit: false }],
+    ["cli zero threads are not explicit", { cli: { threads: 0 }, project: {}, user: {} }, { threadsExplicit: false }],
+    ["absent threads are not explicit", { project: {}, editor: {}, user: {} }, { threadsExplicit: false }],
     ["user beats defaults", { project: {}, user: { index: { max_file_kb: 9, pause_on_battery: true } } }, { maxFileKb: 9, pauseOnBattery: true }],
     [
       "provider and model",

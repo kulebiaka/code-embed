@@ -16,6 +16,7 @@ export interface EffectiveSettings {
   indexLocation: IndexLocation;
   maxFileKb: number;
   threads: number;
+  threadsExplicit: boolean;
   pauseOnBattery: boolean;
   exclude: string[];
   searchMode: SearchMode;
