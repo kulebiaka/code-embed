@@ -21,12 +21,12 @@ function worker(): ChildProcess {
 }
 
 describe("__embed-worker (bundle)", () => {
-  it("answers init for an unknown model with an error response", async () => {
+  it("answers load for an unknown model with an error response", async () => {
     const c = worker();
     const res = await new Promise<{ id: number; ok: boolean; error?: { message: string } }>((resolve, reject) => {
       c.once("message", resolve as (m: unknown) => void);
       c.once("error", reject);
-      c.send({ id: 1, op: "init", model: "nope", opts: { modelsDir: "/nonexistent", threads: 1 } });
+      c.send({ id: 1, op: "load", model: "nope", opts: { modelsDir: "/nonexistent", threads: 1 } });
     });
     expect(res).toMatchObject({ id: 1, ok: false });
     expect(res.error?.message).toContain("unknown model");
@@ -37,7 +37,7 @@ describe("__embed-worker (bundle)", () => {
     await new Promise<void>((resolve, reject) => {
       c.once("message", () => resolve());
       c.once("error", reject);
-      c.send({ id: 1, op: "init", model: "nope", opts: { modelsDir: "/nonexistent", threads: 1 } });
+      c.send({ id: 1, op: "load", model: "nope", opts: { modelsDir: "/nonexistent", threads: 1 } });
     });
     const exited = new Promise<void>((resolve) => c.once("exit", () => resolve()));
     const t0 = Date.now();
