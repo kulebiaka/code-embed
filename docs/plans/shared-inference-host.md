@@ -96,7 +96,7 @@ Step 2, 2026-10-18: `real-model.ts --compare --threads 2 --min-embedded 100` und
 
 1. Host and client behind a `CODE_EMBED_SHARED_HOST=1` flag, with tests.
 2. Measure RSS and latency in `real-model` with 1 and 3 projects.
-3. Enable by default, remove `vector-slot` for the local provider.
+3. Enable by default. `vector-slot/` stays for the fallback path (an engine without a host) and is not removed.
 
 ## Step 3: one inference process per machine
 
@@ -140,3 +140,5 @@ The measurements show the host costs ~190 MB and no query latency, but they do n
 3. Changes 2 and 3 (host key, global queue, host-owned threads) with their tests.
 4. Changes 4 and 5 (`config.toml` sync, fallback through `vector-slot/`).
 5. Change 6 and 7 (default on, `bye`), docs, `real-model --compare --warm` on darwin-arm64 and in the CI `real-model` job.
+
+> Note: the implementation follows the user's decisions (answers.md, Q-01): the minimum-explicit `threads` rule, one multi-model child process, and the host key by `modelsDir` only. The section above is kept as the original plan.

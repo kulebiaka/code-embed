@@ -64,7 +64,7 @@ Every setting in the table below is available on the `Code Embed: Open Settings`
 | --- | --- | --- | --- |
 | `codeEmbed.index.location` | `auto` / `project` / `cache` | `auto` | where to store the index; `auto` falls back to the cache on risky file systems (network drives, cloud sync) |
 | `codeEmbed.index.maxFileKb` | number | 512 | larger files are not indexed |
-| `codeEmbed.index.threads` | integer | 0 | total local-model threads per machine, across all windows and projects (0 = automatic: half of the cores, at most 4); user settings only |
+| `codeEmbed.index.threads` | integer | 0 | hard limit on local-model threads per machine, shared by all windows, the CLI and MCP; if they set different values, the smallest applies (0 = automatic: half of the cores, at most 4); user settings only |
 | `codeEmbed.index.pauseOnBattery` | boolean | false | pause the vector phase on battery |
 | `codeEmbed.index.exclude` | glob array | `[]` | extra excludes on top of `.gitignore`, `files.exclude` and `search.exclude` |
 | `codeEmbed.search.defaultMode` | `hybrid` / `semantic` / `lexical` | `hybrid` | default search mode |
