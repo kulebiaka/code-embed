@@ -132,6 +132,9 @@ export function createInferencePool(o: InferencePoolOptions): InferencePool {
   let blockedUntil = 0;
   let seq = 0;
   let nextId = 0;
+  let pendingThreads: number | undefined;
+  let stopping: Promise<void> | undefined;
+  let restartWaiters: (() => void)[] = [];
 
   const state = (id: string): ModelState => {
     let m = models.get(id);
@@ -207,6 +210,14 @@ export function createInferencePool(o: InferencePoolOptions): InferencePool {
     child = undefined;
     forgetModels();
     return c ? terminate(c) : Promise.resolve();
+  };
+
+  const stopChild = () => {
+    const p = dropChild().then(() => {
+      if (stopping === p) stopping = undefined;
+      pump();
+    });
+    stopping = p;
   };
 
   const onDead = (c: ChildProcess, err: Error) => {
@@ -326,7 +337,16 @@ export function createInferencePool(o: InferencePoolOptions): InferencePool {
         m.timer.unref();
       }
     }
-    if (inflight) return;
+    if (inflight || stopping) return;
+    if (pendingThreads !== undefined) {
+      threads = pendingThreads;
+      pendingThreads = undefined;
+      if (child) {
+        stopChild();
+        return;
+      }
+    }
+    for (const w of restartWaiters.splice(0)) w();
     const c = child;
     if (c) {
       for (const m of models.values()) {
@@ -340,7 +360,7 @@ export function createInferencePool(o: InferencePoolOptions): InferencePool {
       }
     }
     if (queue.length === 0) {
-      if (c && loadedCount() === 0) void dropChild();
+      if (c && loadedCount() === 0) stopChild();
       return;
     }
     let best = 0;
@@ -378,8 +398,13 @@ export function createInferencePool(o: InferencePoolOptions): InferencePool {
     get threads() {
       return threads;
     },
-    async setThreads(n) {
-      threads = n;
+    setThreads(n) {
+      if (disposed) return Promise.resolve();
+      if (pendingThreads === undefined && n === threads && !stopping) return Promise.resolve();
+      pendingThreads = n;
+      const done = new Promise<void>((r) => restartWaiters.push(r));
+      pump();
+      return done;
     },
     embedder(entry, loadOpts) {
       const info = createLocalEmbedder(entry, loadOpts).info;
@@ -453,6 +478,9 @@ export function createInferencePool(o: InferencePoolOptions): InferencePool {
         settleUnload(m);
       }
       failAll(new Error("embedder disposed"));
+      pendingThreads = undefined;
+      for (const w of restartWaiters.splice(0)) w();
+      await stopping;
       await dropChild();
     },
   };
