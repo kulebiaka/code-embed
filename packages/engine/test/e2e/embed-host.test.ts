@@ -46,7 +46,7 @@ beforeAll(async () => {
 beforeEach(() => {
   base = realpathSync(mkdtempSync(join(tmpdir(), "ce-e2e-host-")));
   cache = join(base, "cache");
-  cfg = { model: DEFAULTS.model, opts: { modelsDir: join(base, "models"), threads: 1 }, idleExitMs: 20000 };
+  cfg = { modelsDir: join(base, "models"), idleExitMs: 20000 };
   key = hostKey(cfg);
 });
 
@@ -85,12 +85,13 @@ describe("__embed-host (bundle)", () => {
     conn.listen();
     const hello = await conn.sendRequest<HelloResult>("hello", {
       protocolVersion: HOST_PROTOCOL_VERSION,
-      modelId: cfg.model,
+      modelId: DEFAULTS.model,
       threads: 1,
+      threadsExplicit: false,
       clientId: "e2e",
       active: true,
     });
-    expect(hello.dims).toBe(getModel(cfg.model).dims);
+    expect(hello.dims).toBe(getModel(DEFAULTS.model).dims);
     conn.dispose();
     socket.destroy();
 

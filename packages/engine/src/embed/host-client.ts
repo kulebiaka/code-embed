@@ -37,6 +37,7 @@ import { createWorkerEmbedder, splitDocuments, toError, tsxExecArgv } from "./wo
 
 export interface HostEmbedderOptions {
   project?: string;
+  threadsExplicit?: boolean;
   env?: NodeJS.ProcessEnv;
   worker?: EmbedHostConfig["worker"];
   idleUnloadMs?: number;
@@ -103,8 +104,7 @@ function abortable<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
 export function createHostEmbedder(entry: ModelEntry, opts: LocalEmbedderOptions, o: HostEmbedderOptions = {}): Embedder {
   const info = createLocalEmbedder(entry, opts).info;
   const cfg: EmbedHostConfig = {
-    model: entry.id,
-    opts,
+    modelsDir: opts.modelsDir,
     worker: o.worker,
     idleUnloadMs: o.idleUnloadMs,
     idleExitMs: o.idleExitMs,
@@ -162,6 +162,9 @@ export function createHostEmbedder(entry: ModelEntry, opts: LocalEmbedderOptions
         protocolVersion: HOST_PROTOCOL_VERSION,
         modelId: entry.id,
         threads: opts.threads,
+        threadsExplicit: o.threadsExplicit ?? false,
+        offlineArchive: opts.offlineArchive,
+        proxy: opts.proxy,
         clientId,
         project: o.project,
         active,
