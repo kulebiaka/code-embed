@@ -63,7 +63,7 @@ Fast tests use `CODE_EMBED_FAKE_EMBEDDER=1`, so the real model under VS Code's E
 ```bash
 pnpm build
 pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --model qwen3-embedding-0.6b --vscode min,stable --minutes 5
-CODE_EMBED_SHARED_HOST=1 pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --projects 3
+pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --projects 3
 ```
 
 `--projects <n>` starts n engines on one machine; by default they all use a single host. The checks include `rss` (peak host tree + Σ peak engine tree without the host ≤ L + n × the largest peak of an engine process, L being the model's limit), `rss-host` (host tree alone ≤ L) and `shutdown-host` (after the engines exit the host gets `SIGTERM` and must be gone within 10 s). The host checks are skipped when no host was observed, which is always the case with `CODE_EMBED_SHARED_HOST=0`.
