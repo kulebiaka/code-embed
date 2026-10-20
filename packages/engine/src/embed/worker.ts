@@ -10,6 +10,17 @@ import { createLocalEmbedder, type LocalEmbedderOptions } from "./local";
 import type { Embedder, ModelEntry } from "./types";
 import type { WorkerRequest, WorkerResponse } from "./worker-child";
 
+export interface InferencePoolOptions extends WorkerSpawnOptions {
+  threads: number;
+}
+
+export interface InferencePool {
+  embedder(entry: ModelEntry, loadOpts: LocalEmbedderOptions): Embedder;
+  setThreads(n: number): Promise<void>;
+  readonly threads: number;
+  dispose(): Promise<void>;
+}
+
 export interface WorkerSpawnOptions {
   modulePath?: string;
   args?: string[];
@@ -51,6 +62,7 @@ type RequestBody = WorkerRequest extends infer R ? (R extends unknown ? Omit<R, 
 
 interface Call {
   done: boolean;
+  owner: Set<Call>;
   out: Float32Array[];
   pending: number;
   resolve(v: Float32Array[]): void;
@@ -59,9 +71,11 @@ interface Call {
 }
 
 interface Job {
+  model: string;
+  opts: LocalEmbedderOptions;
   call: Call;
   indices: number[];
-  kind: "query" | "document";
+  kind: "query" | "document" | "load";
   texts: string[];
   prio: number;
   seq: number;
@@ -69,6 +83,7 @@ interface Job {
 
 interface Inflight {
   id: number;
+  model: string;
   job?: Job;
   resolve(v: Float32Array[] | undefined): void;
   reject(e: unknown): void;
@@ -97,26 +112,59 @@ export function splitDocuments(texts: string[]): number[][] {
   return groups;
 }
 
-export function createWorkerEmbedder(entry: ModelEntry, opts: LocalEmbedderOptions, spawn: WorkerSpawnOptions = {}): Embedder {
-  const info = createLocalEmbedder(entry, opts).info;
+interface ModelState {
+  id: string;
+  loaded: boolean;
+  timer?: ReturnType<typeof setTimeout>;
+  unloadMode?: "idle" | "explicit";
+  unloadWaiters: (() => void)[];
+}
 
+export function createInferencePool(o: InferencePoolOptions): InferencePool {
+  const spawn: WorkerSpawnOptions = o;
+  let threads = o.threads;
   let child: ChildProcess | undefined;
-  let ready = false;
-  let initP: Promise<void> | undefined;
   let inflight: Inflight | undefined;
   const queue: Job[] = [];
+  const models = new Map<string, ModelState>();
   let disposed = false;
   let crashes = 0;
   let blockedUntil = 0;
   let seq = 0;
   let nextId = 0;
-  let idleTimer: ReturnType<typeof setTimeout> | undefined;
-  let unloadWhenIdle = false;
+
+  const state = (id: string): ModelState => {
+    let m = models.get(id);
+    if (!m) {
+      m = { id, loaded: false, unloadWaiters: [] };
+      models.set(id, m);
+    }
+    return m;
+  };
+
+  const loadedCount = () => {
+    let n = 0;
+    for (const m of models.values()) if (m.loaded) n++;
+    return n;
+  };
+
+  const hasWork = (model: string) => queue.some((j) => j.model === model) || inflight?.model === model;
+
+  const clearTimer = (m: ModelState) => {
+    if (m.timer) clearTimeout(m.timer);
+    m.timer = undefined;
+  };
+
+  const settleUnload = (m: ModelState) => {
+    m.unloadMode = undefined;
+    for (const w of m.unloadWaiters.splice(0)) w();
+  };
 
   const finish = (call: Call, err?: unknown) => {
     if (call.done) return;
     call.done = true;
     call.detach?.();
+    call.owner.delete(call);
     for (let i = queue.length - 1; i >= 0; i--) if (queue[i]!.call === call) queue.splice(i, 1);
     if (err !== undefined) call.reject(err);
     else call.resolve(call.out);
@@ -146,11 +194,25 @@ export function createWorkerEmbedder(entry: ModelEntry, opts: LocalEmbedderOptio
       }
     });
 
+  const forgetModels = () => {
+    for (const m of models.values()) {
+      m.loaded = false;
+      clearTimer(m);
+      settleUnload(m);
+    }
+  };
+
+  const dropChild = (): Promise<void> => {
+    const c = child;
+    child = undefined;
+    forgetModels();
+    return c ? terminate(c) : Promise.resolve();
+  };
+
   const onDead = (c: ChildProcess, err: Error) => {
     if (child !== c) return;
     child = undefined;
-    ready = false;
-    initP = undefined;
+    forgetModels();
     if (++crashes >= MAX_CRASHES) blockedUntil = Date.now() + BLOCK_MS;
     failAll(err);
   };
@@ -198,10 +260,10 @@ export function createWorkerEmbedder(entry: ModelEntry, opts: LocalEmbedderOptio
     return c;
   };
 
-  const request = (c: ChildProcess, msg: RequestBody, job?: Job): Promise<Float32Array[] | undefined> =>
+  const request = (c: ChildProcess, msg: RequestBody, model: string, job?: Job): Promise<Float32Array[] | undefined> =>
     new Promise((resolve, reject) => {
       const id = ++nextId;
-      inflight = { id, job, resolve, reject };
+      inflight = { id, model, job, resolve, reject };
       c.send({ ...msg, id }, (err) => {
         if (err && inflight?.id === id) {
           inflight = undefined;
@@ -210,78 +272,97 @@ export function createWorkerEmbedder(entry: ModelEntry, opts: LocalEmbedderOptio
       });
     });
 
-  const boot = async (): Promise<void> => {
+  const ensureChild = (): ChildProcess | undefined => {
+    if (child) return child;
     if (crashes >= MAX_CRASHES) {
       if (Date.now() < blockedUntil) {
-        throw new ProviderUnavailableError("local inference process keeps crashing; not restarting for 10 minutes", BLOCK_MS);
+        failAll(new ProviderUnavailableError("local inference process keeps crashing; not restarting for 10 minutes", BLOCK_MS));
+        return undefined;
       }
       crashes = 0;
     }
-    const c = spawnChild();
-    child = c;
-    try {
-      await request(c, { op: "init", model: entry.id, opts });
-    } catch (err) {
-      if (child === c) {
-        child = undefined;
-        ready = false;
-        void terminate(c);
-        failAll(err);
-      }
-      throw err;
-    }
-    if (child !== c) throw new ProviderUnavailableError("local inference process was stopped");
-    ready = true;
-    pump();
+    child = spawnChild();
+    return child;
   };
 
-  const start = (): Promise<void> => {
-    if (disposed) return Promise.reject(new Error("embedder disposed"));
-    if (initP) return initP;
-    const p = boot();
-    initP = p;
-    p.catch(() => {
-      if (initP === p) initP = undefined;
-    });
-    return p;
+  const loadModel = (c: ChildProcess, job: Job) => {
+    const m = state(job.model);
+    request(c, { op: "load", model: job.model, opts: { ...job.opts, threads } }, job.model).then(
+      () => {
+        if (child !== c) return;
+        m.loaded = true;
+        pump();
+      },
+      (err) => {
+        if (child !== c) return;
+        for (const j of [...queue]) if (j.model === job.model) finish(j.call, err);
+        pump();
+      },
+    );
   };
 
-  const unloadNow = (): Promise<void> => {
-    unloadWhenIdle = false;
-    const c = child;
-    if (!c) return Promise.resolve();
-    child = undefined;
-    ready = false;
-    initP = undefined;
-    return terminate(c);
+  const unloadModel = (c: ChildProcess, m: ModelState) => {
+    const done = () => {
+      if (child === c) m.loaded = false;
+      settleUnload(m);
+      pump();
+    };
+    request(c, { op: "unload", model: m.id }, m.id).then(done, done);
   };
 
   const pump = () => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = undefined;
-    if (queue.length === 0) {
-      if (child && ready && !inflight) {
-        if (unloadWhenIdle) void unloadNow();
-        else {
-          idleTimer = setTimeout(() => void unloadNow(), spawn.idleUnloadMs ?? IDLE_UNLOAD_MS);
-          idleTimer.unref();
-        }
+    if (disposed) return;
+    for (const m of models.values()) {
+      if (!m.loaded) continue;
+      if (m.unloadMode === "idle" && hasWork(m.id)) m.unloadMode = undefined;
+      if (hasWork(m.id)) clearTimer(m);
+      else if (!m.timer && !m.unloadMode) {
+        m.timer = setTimeout(() => {
+          m.timer = undefined;
+          if (!m.loaded || hasWork(m.id)) return;
+          m.unloadMode ??= "idle";
+          pump();
+        }, spawn.idleUnloadMs ?? IDLE_UNLOAD_MS);
+        m.timer.unref();
       }
+    }
+    if (inflight) return;
+    const c = child;
+    if (c) {
+      for (const m of models.values()) {
+        if (!m.unloadMode || hasWork(m.id)) continue;
+        if (m.loaded) {
+          clearTimer(m);
+          unloadModel(c, m);
+          return;
+        }
+        settleUnload(m);
+      }
+    }
+    if (queue.length === 0) {
+      if (c && loadedCount() === 0) void dropChild();
       return;
     }
-    if (!child) {
-      start().catch((err) => failAll(err));
-      return;
-    }
-    if (!ready || inflight) return;
     let best = 0;
     for (let i = 1; i < queue.length; i++) {
       const a = queue[i]!;
       const b = queue[best]!;
       if (a.prio < b.prio || (a.prio === b.prio && a.seq < b.seq)) best = i;
     }
-    const job = queue.splice(best, 1)[0]!;
-    request(child, { op: "embed", kind: job.kind, texts: job.texts }, job).then(
+    const job = queue[best]!;
+    const target = ensureChild();
+    if (!target) return;
+    if (!state(job.model).loaded) {
+      loadModel(target, job);
+      return;
+    }
+    queue.splice(best, 1);
+    if (job.kind === "load") {
+      finish(job.call);
+      pump();
+      return;
+    }
+    request(target, { op: "embed", model: job.model, kind: job.kind, texts: job.texts }, job.model, job).then(
       (vecs) => {
         if (job.call.done) return;
         job.indices.forEach((pos, k) => {
@@ -293,72 +374,98 @@ export function createWorkerEmbedder(entry: ModelEntry, opts: LocalEmbedderOptio
     );
   };
 
-  const run = (
-    kind: "query" | "document",
-    total: number,
-    groups: { indices: number[]; texts: string[]; prio: number }[],
-    signal?: AbortSignal,
-  ): Promise<Float32Array[]> => {
-    if (signal?.aborted) return Promise.reject(signal.reason);
-    return new Promise((resolve, reject) => {
-      const call: Call = { done: false, out: new Array<Float32Array>(total), pending: groups.length, resolve, reject };
-      if (signal) {
-        const onAbort = () => finish(call, signal.reason);
-        signal.addEventListener("abort", onAbort, { once: true });
-        call.detach = () => signal.removeEventListener("abort", onAbort);
-      }
-      for (const g of groups) queue.push({ call, kind, indices: g.indices, texts: g.texts, prio: g.prio, seq: seq++ });
-      pump();
-    });
-  };
-
-  const abortable = <T>(p: Promise<T>, signal?: AbortSignal): Promise<T> => {
-    if (!signal) return p;
-    if (signal.aborted) return Promise.reject(signal.reason);
-    return new Promise((resolve, reject) => {
-      const onAbort = () => reject(signal.reason);
-      signal.addEventListener("abort", onAbort, { once: true });
-      p.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
-    });
-  };
-
   return {
-    info,
-    init: (signal) => abortable(start(), signal),
-    async embedQueries(texts, signal) {
-      if (texts.length === 0) return [];
-      return run("query", texts.length, [{ indices: texts.map((_, i) => i), texts, prio: PRIO_QUERY }], signal);
+    get threads() {
+      return threads;
     },
-    async embedDocuments(texts, signal) {
-      if (texts.length === 0) return [];
-      const groups = splitDocuments(texts);
-      const prio = groups.length === 1 ? PRIO_INTERACTIVE : PRIO_BATCH;
-      return run(
-        "document",
-        texts.length,
-        groups.map((indices) => ({ indices, texts: indices.map((i) => texts[i]!), prio })),
-        signal,
-      );
+    async setThreads(n) {
+      threads = n;
     },
-    countTokens: (text) => Math.ceil(text.length / 4),
-    async unload() {
-      if (inflight || queue.length > 0) unloadWhenIdle = true;
-      else {
-        if (idleTimer) clearTimeout(idleTimer);
-        idleTimer = undefined;
-        await unloadNow();
-      }
+    embedder(entry, loadOpts) {
+      const info = createLocalEmbedder(entry, loadOpts).info;
+      const model = entry.id;
+      const calls = new Set<Call>();
+      let handleDisposed = false;
+      state(model);
+
+      const run = (
+        kind: Job["kind"],
+        total: number,
+        groups: { indices: number[]; texts: string[]; prio: number }[],
+        signal?: AbortSignal,
+      ): Promise<Float32Array[]> => {
+        if (disposed || handleDisposed) return Promise.reject(new Error("embedder disposed"));
+        if (signal?.aborted) return Promise.reject(signal.reason);
+        return new Promise((resolve, reject) => {
+          const call: Call = { done: false, owner: calls, out: new Array<Float32Array>(total), pending: groups.length, resolve, reject };
+          calls.add(call);
+          if (signal) {
+            const onAbort = () => finish(call, signal.reason);
+            signal.addEventListener("abort", onAbort, { once: true });
+            call.detach = () => signal.removeEventListener("abort", onAbort);
+          }
+          for (const g of groups) {
+            queue.push({ model, opts: loadOpts, call, kind, indices: g.indices, texts: g.texts, prio: g.prio, seq: seq++ });
+          }
+          pump();
+        });
+      };
+
+      return {
+        info,
+        async init(signal) {
+          await run("load", 0, [{ indices: [], texts: [], prio: PRIO_QUERY }], signal);
+        },
+        async embedQueries(texts, signal) {
+          if (texts.length === 0) return [];
+          return run("query", texts.length, [{ indices: texts.map((_, i) => i), texts, prio: PRIO_QUERY }], signal);
+        },
+        async embedDocuments(texts, signal) {
+          if (texts.length === 0) return [];
+          const groups = splitDocuments(texts);
+          const prio = groups.length === 1 ? PRIO_INTERACTIVE : PRIO_BATCH;
+          return run(
+            "document",
+            texts.length,
+            groups.map((indices) => ({ indices, texts: indices.map((i) => texts[i]!), prio })),
+            signal,
+          );
+        },
+        countTokens: (text) => Math.ceil(text.length / 4),
+        async unload() {
+          const m = state(model);
+          if (!m.loaded || disposed) return;
+          const wait = hasWork(model) ? undefined : new Promise<void>((r) => m.unloadWaiters.push(r));
+          m.unloadMode = "explicit";
+          pump();
+          await wait;
+        },
+        async dispose() {
+          handleDisposed = true;
+          for (const call of [...calls]) finish(call, new Error("embedder disposed"));
+        },
+      };
     },
     async dispose() {
       disposed = true;
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = undefined;
-      const c = child;
-      child = undefined;
-      ready = false;
-      initP = undefined;
+      for (const m of models.values()) {
+        clearTimer(m);
+        settleUnload(m);
+      }
       failAll(new Error("embedder disposed"));
-      if (c) await terminate(c);
+      await dropChild();
+    },
+  };
+}
+
+export function createWorkerEmbedder(entry: ModelEntry, opts: LocalEmbedderOptions, spawn: WorkerSpawnOptions = {}): Embedder {
+  const pool = createInferencePool({ ...spawn, threads: opts.threads });
+  const handle = pool.embedder(entry, opts);
+  return {
+    ...handle,
+    async dispose() {
+      await handle.dispose();
+      await pool.dispose();
     },
   };
 }
