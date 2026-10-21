@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PROTOCOL_VERSION, type IndexProgress, type SearchResponse } from "@code-embed/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultThreads } from "../config/resolve";
 import { FakeEmbedder } from "../embed/fake";
 import * as registry from "../embed/registry";
 import { NoIndexError, ProtocolMismatchError } from "../errors";
@@ -343,6 +344,17 @@ describe("LocalEngine", () => {
       expect(s.embedded).toBe(s.chunks);
     });
     expect(created.slice(0, 2).map((r) => r.calls)).toEqual(stale);
+  });
+
+  it("recreates the embedder when threads become explicit with the default value", async () => {
+    const root = makeRepo();
+    const engine = await open(root);
+    await engine.indexAll({});
+    const resolve = vi.mocked(registry.resolveEmbedder);
+    const before = resolve.mock.calls.length;
+    await engine.updateSettings({ index: { threads: defaultThreads() } });
+    expect(resolve.mock.calls.length).toBe(before + 1);
+    expect(resolve.mock.calls.at(-1)![0]).toMatchObject({ settings: { threadsExplicit: true } });
   });
 
   it("lists providers and models, and tests a provider", async () => {

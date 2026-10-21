@@ -72,7 +72,7 @@ function mergeSettings(a: EngineSettings, b: EngineSettings): EngineSettings {
 }
 
 function embeddingKey(s: EffectiveSettings): string {
-  return JSON.stringify([s.provider, s.model, s.providers, s.allowRemote, s.offlineArchive, s.proxy, s.threads]);
+  return JSON.stringify([s.provider, s.model, s.providers, s.allowRemote, s.offlineArchive, s.proxy, s.threads, s.threadsExplicit]);
 }
 
 function msg(e: unknown): string {

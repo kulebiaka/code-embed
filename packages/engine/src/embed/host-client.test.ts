@@ -11,7 +11,7 @@ import {
   StreamMessageWriter,
   createMessageConnection,
 } from "vscode-jsonrpc/node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULTS } from "../config/types";
 import { isProcessAlive } from "../core/lock";
 import { embedHostSocketPath } from "../core/paths";
@@ -375,8 +375,7 @@ describe("createHostEmbedder", () => {
       expect(hostLog()).toMatch(/effective threads 1 \(from \d+-\d+\)/);
       await rawHello({ threads: 1, threadsExplicit: false });
       await a.dispose();
-      await sleep(300);
-      expect(hostLog()).toMatch(/effective threads \d+ \(from default\)/);
+      await vi.waitFor(() => expect(hostLog()).toMatch(/effective threads \d+ \(from default\)/), { timeout: 5000 });
     });
   });
 

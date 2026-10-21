@@ -71,6 +71,7 @@ afterEach(() => {
   process.env.CODE_EMBED_CACHE_DIR = saved.cache;
   rmSync(process.env.TMPDIR!, { recursive: true, force: true });
   process.env.TMPDIR = saved.tmpdir;
+  if (saved.tmpdir === undefined) delete process.env.TMPDIR;
   if (saved.cache === undefined) delete process.env.CODE_EMBED_CACHE_DIR;
   rmSync(tmp, { recursive: true, force: true });
 });
