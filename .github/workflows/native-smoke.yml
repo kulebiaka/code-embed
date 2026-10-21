@@ -52,7 +52,7 @@ jobs:
       - name: Electron
         if: runner.os != 'Linux'
         run: pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: stage0-${{ matrix.target }}
@@ -98,7 +98,7 @@ jobs:
         if: runner.os != 'Linux'
         shell: bash
         run: pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --model "$REAL_MODELS" --vscode min,stable
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: real-model-${{ matrix.target }}

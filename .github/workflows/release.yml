@@ -58,7 +58,7 @@ jobs:
       - name: Electron
         if: runner.os != 'Linux'
         run: pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: stage0-${{ matrix.target }}
@@ -89,7 +89,7 @@ jobs:
       - run: pnpm build
       - run: node packages/extension/scripts/package.mjs --target ${{ matrix.target }}
       - run: node scripts/check-vsix-size.mjs packages/extension/dist-vsix
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vsix-${{ matrix.target }}
           path: packages/extension/dist-vsix/*.vsix

@@ -34,7 +34,7 @@ jobs:
           key: eval-repos-${{ hashFiles('eval/repos.json') }}
       - run: pnpm --filter @code-embed/eval run fetch-repos
       - run: pnpm --filter @code-embed/eval run eval -- --strict
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: eval-report
