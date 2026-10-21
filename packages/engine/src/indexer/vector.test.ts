@@ -154,6 +154,18 @@ describe("vector phase", () => {
     await phase.stop();
   });
 
+  it("commits after commitMs even before commitEvery batches", async () => {
+    addFile("a.ts", Array.from({ length: 6 }, (_, i) => `t${i}`));
+    const setEmb = vi.spyOn(store, "setEmbeddings");
+    const emb = new FakeEmbedder({ dims: 8 });
+    const phase = createVectorPhase({ ctx, embCache: cache, embedder: emb, batchSize: 2, commitEvery: 100, commitMs: 0 });
+    phase.start();
+    await phase.whenIdle();
+    expect(setEmb.mock.calls.map((c) => c[0].length)).toEqual([2, 2, 2]);
+    expect(progress.filter((p) => p.phase === "vector").map((p) => p.embedded)).toEqual([0, 2, 4, 6]);
+    await phase.stop();
+  });
+
   it("orders opened files first, then shallow paths", async () => {
     addFile("x/y/deep.ts", ["deep"]);
     addFile("top.ts", ["top"]);

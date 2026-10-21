@@ -29,6 +29,8 @@ export interface VectorPhaseDeps {
   embedder: Embedder;
   batchSize?: number;
   commitEvery?: number;
+  // with a shared host several projects split the throughput, so commitEvery batches alone can take minutes
+  commitMs?: number;
   // Shared with other processes; absent for providers that do not use local CPU.
   slot?: VectorSlot;
   isActive?: () => boolean;
@@ -57,6 +59,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
   const isActive = deps.isActive ?? (() => true);
   const batchSize = deps.batchSize ?? 32;
   const commitEvery = deps.commitEvery ?? 8;
+  const commitMs = deps.commitMs ?? 10_000;
   const root = ctx.root;
 
   let state: State = "idle";
@@ -77,6 +80,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
 
   const uncommitted = new Map<number, Int8Array>();
   let batchesSinceCommit = 0;
+  let committedAt = Date.now();
   let dimsReady = false;
 
   const setState = (s: State) => {
@@ -102,6 +106,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
 
   const flush = () => {
     batchesSinceCommit = 0;
+    committedAt = Date.now();
     if (uncommitted.size === 0) return;
     const items = [...uncommitted].map(([chunkId, vector]) => ({ chunkId, vector }));
     ctx.store.transaction(() => ctx.store.setEmbeddings(items));
@@ -147,7 +152,7 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
       for (const f of fresh) vectors.set(f.chunkHash, f.vector);
     }
     for (const r of rows) uncommitted.set(r.id, quantizeInt8(vectors.get(r.chunkHash)!));
-    if (++batchesSinceCommit >= commitEvery) {
+    if (++batchesSinceCommit >= commitEvery || Date.now() - committedAt >= commitMs) {
       flush();
       progress("vector");
     }
