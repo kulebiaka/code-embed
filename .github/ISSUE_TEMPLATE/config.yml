@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/kulebiaka/code-embed/discussions
+    about: Ask how to use code-embed or discuss an idea before opening an issue.
+  - name: Security vulnerability
+    url: https://github.com/kulebiaka/code-embed/security/advisories/new
+    about: Report vulnerabilities privately, not in a public issue.

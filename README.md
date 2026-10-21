@@ -253,7 +253,7 @@ pnpm typecheck
 pnpm check:docs     # docs stay in sync with --help, settings and the model catalog
 ```
 
-The monorepo contains `packages/engine` (engine and CLI), `packages/extension` (VS Code extension), `packages/protocol` (shared JSON-RPC and tool types) and `eval/` (quality evaluation). See [CONTRIBUTING.md](CONTRIBUTING.md) for the release process and [CHANGELOG.md](CHANGELOG.md) for version history.
+The monorepo contains `packages/engine` (engine and CLI), `packages/extension` (VS Code extension), `packages/protocol` (shared JSON-RPC and tool types) and `eval/` (quality evaluation). See [CONTRIBUTING.md](CONTRIBUTING.md) for the release process and [CHANGELOG.md](CHANGELOG.md) for version history. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md); participation follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Licenses
 
