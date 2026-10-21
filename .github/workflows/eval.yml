@@ -17,7 +17,7 @@ jobs:
     env:
       CODE_EMBED_CACHE_DIR: ${{ github.workspace }}/.ci-cache/code-embed
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

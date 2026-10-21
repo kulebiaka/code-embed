@@ -35,7 +35,7 @@ jobs:
     env:
       STAGE0_REPORT_DIR: ${{ github.workspace }}/stage0-reports
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -76,7 +76,7 @@ jobs:
       REAL_MODEL_REPORT_DIR: ${{ github.workspace }}/real-model-reports
       REAL_MODELS: ${{ github.event_name == 'push' && 'multilingual-e5-small,qwen3-embedding-0.6b' || inputs.models }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
