@@ -27,7 +27,7 @@ jobs:
         include:
           - { target: win32-x64, os: windows-2022 }
           - { target: win32-arm64, os: windows-11-arm }
-          - { target: darwin-x64, os: macos-13 }
+          - { target: darwin-x64, os: macos-15-intel }
           - { target: darwin-arm64, os: macos-14 }
           - { target: linux-x64, os: ubuntu-22.04 }
           - { target: linux-arm64, os: ubuntu-22.04-arm }
@@ -72,7 +72,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     env:
-      CODE_EMBED_MODELS_DIR: ${{ runner.temp }}/models
       REAL_MODEL_REPORT_DIR: ${{ github.workspace }}/real-model-reports
       REAL_MODELS: ${{ github.event_name == 'push' && 'multilingual-e5-small,qwen3-embedding-0.6b' || inputs.models }}
     steps:
@@ -84,6 +83,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: echo "CODE_EMBED_MODELS_DIR=$RUNNER_TEMP/models" >> "$GITHUB_ENV"
+        shell: bash
       - uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/models
