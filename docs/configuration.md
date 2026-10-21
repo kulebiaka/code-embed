@@ -4,7 +4,7 @@
 
 From highest to lowest: CLI flags, the project's `.code-embed.toml`, editor settings (VS Code `codeEmbed.*`), the user `config.toml`, defaults. Exception: `threads` and `pause_on_battery` cannot be set in the project file.
 
-User files (`config.toml`, `providers.toml`, `consents.toml`) live in the config directory (override with `CODE_EMBED_CONFIG_DIR`). The global cache (`emb.db`, models) lives in the cache directory (`CODE_EMBED_CACHE_DIR`). `CODE_EMBED_SHARED_HOST=1` turns on a shared inference process for the whole machine (by default every engine starts its own); see [Shared inference host](architecture.md#shared-inference-host).
+User files (`config.toml`, `providers.toml`, `consents.toml`) live in the config directory (override with `CODE_EMBED_CONFIG_DIR`). The global cache (`emb.db`, models) lives in the cache directory (`CODE_EMBED_CACHE_DIR`). By default all engines on the machine share one inference process for the local model; `CODE_EMBED_SHARED_HOST=0` makes every engine start its own. See [Shared inference host](architecture.md#shared-inference-host).
 
 ## .code-embed.toml
 

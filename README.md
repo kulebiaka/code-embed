@@ -48,6 +48,7 @@ grep finds what you can spell. code-embed finds what you mean: *"retry with expo
 - **Find similar code** for a line range or a snippet from stdin — duplicates, near-copies, other places that need the same fix.
 - **Syntax-aware chunking** with tree-sitter for TypeScript/JavaScript, Python, Go, Rust, Java, C#, C, C++, PHP, Ruby and Kotlin; Markdown by section; sliding windows for everything else.
 - **Instant start.** Indexing runs in two phases: lexical (search works right away), then vector in the background.
+- **One model per machine.** Ten VS Code windows, a daemon, the CLI and an MCP server share one inference process with one copy of the model and one thread limit, so the laptop stays usable ([details](#one-inference-process-per-machine)).
 - **Bring your own embeddings.** Built-in local ONNX models, or any OpenAI-compatible API (Ollama, LM Studio, hosted providers).
 - **Built for agents.** VS Code LM Tools `#semsearch` and `#similar`, and an MCP server for Cursor, Windsurf and Claude Code.
 - **Private by default.** No telemetry. Nothing is sent anywhere unless you configure an external provider and confirm it.
@@ -242,6 +243,31 @@ Quality evaluation on query datasets (Recall@10, MRR): [eval/README.md](eval/REA
 ```
 
 Details: [docs/architecture.md](docs/architecture.md). The scanner walks the project respecting `.gitignore` and skips binary, minified, oversized and generated files; files are split into chunks; the lexical phase fills FTS5, and the vector phase computes embeddings (with the global `emb.db` cache) and writes them to sqlite-vec. Search merges BM25 and kNN with RRF.
+
+### One inference process per machine
+
+A local embedding model is the only heavy part of code-embed: `qwen3-embedding-0.6b` takes about 1–1.3 GB of RAM and keeps the CPU busy while it indexes. If every VS Code window ran its own copy, five open projects would mean five models in memory and five times the threads. So the model runs in one process for the whole machine:
+
+```
+  VS Code window A ─ engine ─┐
+  VS Code window B ─ engine ─┤            ┌──────────────────────┐
+  code-embed daemon ─────────┼─ socket ──►│ __embed-host         │
+  code-embed mcp ────────────┤            │   └ __embed-worker   │  ← the model, loaded once
+  code-embed "query" ────────┘            └──────────────────────┘
+```
+
+- **One host, one model.** The first engine that needs the local model starts `__embed-host` (a detached `cli.js` process) and every other engine on the machine connects to it over a local socket (mode 0600, current user only). The host runs the model in a single child process, `__embed-worker`. Each engine is then about 200 MB; the model's memory is paid once. Several different models can be loaded in that one child if projects use different ones.
+- **Projects take turns, not a queue.** Indexing requests from all projects go through one queue in the host. The project in the focused window goes first, the rest are served round-robin, so every project makes progress at the same time. Search queries jump ahead of indexing. With three projects indexing at once each one gets roughly a third of the throughput; indexed vectors are saved at least every 10 seconds, so progress and semantic results show up right away.
+- **One thread limit.** `codeEmbed.index.threads` (`threads` under `[index]` in the user `config.toml` for the CLI and MCP) is a hard limit for the whole machine, not per window. `0` means automatic: half of the cores, at most 4. If clients set different explicit values, the smallest one wins; clients on automatic do not lower it. The host logs every change as `effective threads N (from …)` and restarts the worker with the new count after the request in flight. The setting is machine-wide, so it cannot be set in a project's `.code-embed.toml` and VS Code always writes it to user settings.
+- **Low priority, quiet in the background.** The worker runs below normal priority. A window that has been out of focus for 30 seconds stops scanning for changes (they are applied when it is focused again) and its indexing yields to the active window. `codeEmbed.index.pauseOnBattery` pauses indexing on battery.
+- **Comes and goes by itself.** The model is loaded on the first request and unloaded after 5 minutes without work; the worker exits when no model is loaded. The host exits 10 minutes after its last client disconnects. There is nothing to start, stop or configure.
+- **Survives crashes.** If the worker crashes, in-flight requests fail and the next one restarts it; after 3 crashes in a row the model is paused for 10 minutes. If the host dies, the next request starts a new one.
+- **Upgrades.** The host is keyed by the engine version and the models directory, so a new extension or CLI version starts its own host, and the old one exits once its clients are gone.
+- **Fallback.** If the host cannot be started or refuses a client, that engine runs its own `__embed-worker` and logs a warning; such a private process is not under the machine-wide thread limit, and local indexing then goes through a machine-wide queue (`vector-slot/`) where one project indexes at a time. `CODE_EMBED_SHARED_HOST=0` forces this mode.
+
+Static models (`potion-*`) are tiny and run inside the engine process; remote providers (OpenAI-compatible APIs) do not use the host at all.
+
+To see what is running: `ps ax | grep -E '__embed-(host|worker)'` shows at most one host and one worker per engine version. The host log is `logs/embed-host-<key>.log` in the cache directory (`CODE_EMBED_CACHE_DIR`). More in [docs/architecture.md](docs/architecture.md#shared-inference-host).
 
 ## Development
 
