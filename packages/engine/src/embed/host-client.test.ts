@@ -12,6 +12,7 @@ import {
   createMessageConnection,
 } from "vscode-jsonrpc/node";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defaultThreads } from "../config/resolve";
 import { DEFAULTS } from "../config/types";
 import { isProcessAlive } from "../core/lock";
 import { embedHostSocketPath } from "../core/paths";
@@ -370,9 +371,10 @@ describe("createHostEmbedder", () => {
     });
 
     it("logs the effective threads on hello and when a client leaves", async () => {
-      const a = make({}, { threadsExplicit: true });
+      const explicit = defaultThreads() + 1;
+      const a = make({}, { threadsExplicit: true }, undefined, explicit);
       await a.init();
-      expect(hostLog()).toMatch(/effective threads 1 \(from \d+-\d+\)/);
+      expect(hostLog()).toMatch(new RegExp(`effective threads ${explicit} \\(from \\d+-\\d+\\)`));
       await rawHello({ threads: 1, threadsExplicit: false });
       await a.dispose();
       await vi.waitFor(() => expect(hostLog()).toMatch(/effective threads \d+ \(from default\)/), { timeout: 5000 });
