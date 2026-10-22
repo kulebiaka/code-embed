@@ -6,19 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Added
-
-- Shared inference host, on by default (`CODE_EMBED_SHARED_HOST=0` turns it off): one host per machine serves the local models for all windows, daemons, MCP servers and CLI runs, projects index interleaved instead of queueing, and `codeEmbed.index.threads` is one thread limit shared by all of them.
-
-### Fixed
-
-- Indexing progress with several projects on the shared inference host: vectors are committed at least every 10 seconds, so each project's embedded count and semantic search advance right away instead of after several minutes.
-- Search and "Find Similar" during indexing: the 800 ms budget now counts from the start of the request, not only the embedding step, so a response is either on time or marked `partial` with `timed out`.
-- Shared inference host restart: if the host is killed, an engine that connects while it is still dying no longer falls back to a private inference process for the rest of its life; it waits for the dying host to go away and starts a new one.
-- Switching `codeEmbed.index.threads` between automatic and an explicit value equal to the automatic one now takes effect without reopening the window.
-- Concurrent access to `emb.db` from several processes: `busy_timeout`, a retry of the WAL initialization when the database is busy, `BEGIN IMMEDIATE` on writes, and a non-blocking `last_used` update on reads.
-
-## [0.1.0] - 2026-10-16
+## [0.1.0] - 2026-10-22
 
 First public release.
 
@@ -32,7 +20,10 @@ First public release.
 - CLI `code-embed` with `index`, `similar`, `status`, `daemon`, `stop`, `mcp`, `model`, `provider`, `gc`, `clean`, `export` and `import`.
 - MCP server with the `search` and `find_similar` tools.
 - VS Code extension: search panel with keyboard navigation and result actions, Quick Search, Find Similar Code, settings page, LM Tools `#semsearch` and `#similar`, MCP server definition provider.
-- One local-model indexing slot per machine, a shared thread budget and background-window throttling to keep load low with many VS Code windows open.
+- Shared inference host, on by default (`CODE_EMBED_SHARED_HOST=0` turns it off): one host per machine serves the local models for all windows, daemons, MCP servers and CLI runs, projects index interleaved instead of queueing, and `codeEmbed.index.threads` is one thread limit shared by all of them.
+- Background-window throttling to keep load low with many VS Code windows open.
+- Safe concurrent access to the embeddings database from several processes.
+- Search and "Find Similar" answer within 800 ms during indexing, or return a result marked `partial`.
 
 [Unreleased]: https://github.com/kulebiaka/code-embed/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/kulebiaka/code-embed/releases/tag/v0.1.0
