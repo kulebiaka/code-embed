@@ -41,9 +41,9 @@ jobs:
     env:
       STAGE0_REPORT_DIR: ${{ github.workspace }}/stage0-reports
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22.x
           cache: pnpm
@@ -58,7 +58,7 @@ jobs:
       - name: Electron
         if: runner.os != 'Linux'
         run: pnpm --filter @code-embed/eval exec tsx stage0/check-electron.ts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: stage0-${{ matrix.target }}
@@ -77,9 +77,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22.x
           cache: pnpm
@@ -89,7 +89,7 @@ jobs:
       - run: pnpm build
       - run: node packages/extension/scripts/package.mjs --target ${{ matrix.target }}
       - run: node scripts/check-vsix-size.mjs packages/extension/dist-vsix
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vsix-${{ matrix.target }}
           path: packages/extension/dist-vsix/*.vsix
@@ -99,16 +99,16 @@ jobs:
     needs: vsix
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22.x
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: vsix-*
           path: release
