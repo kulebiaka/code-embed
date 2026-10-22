@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Indexing progress with several projects on the shared inference host: vectors are committed at least every 10 seconds, so each project's embedded count and semantic search advance right away instead of after several minutes.
 - Search and "Find Similar" during indexing: the 800 ms budget now counts from the start of the request, not only the embedding step, so a response is either on time or marked `partial` with `timed out`.
+- Shared inference host restart: if the host is killed, an engine that connects while it is still dying no longer falls back to a private inference process for the rest of its life; it waits for the dying host to go away and starts a new one.
 - Switching `codeEmbed.index.threads` between automatic and an explicit value equal to the automatic one now takes effect without reopening the window.
 - Concurrent access to `emb.db` from several processes: `busy_timeout`, a retry of the WAL initialization when the database is busy, `BEGIN IMMEDIATE` on writes, and a non-blocking `last_used` update on reads.
 

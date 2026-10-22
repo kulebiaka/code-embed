@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CancellationTokenSource,
+  ErrorCodes,
   type MessageConnection,
   ResponseError,
   StreamMessageReader,
@@ -84,6 +85,8 @@ function spawnHost(key: string, cfg: EmbedHostConfig, env: NodeJS.ProcessEnv): s
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+const DROPPED: number[] = [ErrorCodes.MessageWriteError, ErrorCodes.PendingResponseRejected, ErrorCodes.ConnectionInactive];
+
 interface Link {
   conn: MessageConnection;
   socket: Socket;
@@ -133,50 +136,55 @@ export function createHostEmbedder(entry: ModelEntry, opts: LocalEmbedderOptions
     let logFile = join(cacheDir(), "logs", `embed-host-${key}.log`);
     const deadline = Date.now() + (o.startTimeoutMs ?? START_TIMEOUT_MS);
     let spawned = false;
-    let socket: Socket | null;
-    // the lock is checked on every round: a host that is starting, or has just died, holds it for a moment
     for (;;) {
-      socket = await probeSocket(path, PROBE_MS);
-      if (socket || Date.now() >= deadline) break;
-      if (!spawned) {
-        const pid = readLockPid(cacheDir(), hostLockName(key));
-        if (pid === null || !isProcessAlive(pid)) {
-          logFile = spawnHost(key, cfg, o.env ?? process.env);
-          spawned = true;
+      let socket: Socket | null;
+      // the lock is checked on every round: a host that is starting, or has just died, holds it for a moment
+      for (;;) {
+        socket = await probeSocket(path, PROBE_MS);
+        if (socket || Date.now() >= deadline) break;
+        if (!spawned) {
+          const pid = readLockPid(cacheDir(), hostLockName(key));
+          if (pid === null || !isProcessAlive(pid)) {
+            logFile = spawnHost(key, cfg, o.env ?? process.env);
+            spawned = true;
+          }
         }
+        await new Promise((r) => setTimeout(r, 50));
       }
-      await new Promise((r) => setTimeout(r, 50));
+      if (!socket) return `embedding host did not start; see ${logFile}`;
+      socket.on("error", () => {});
+      const conn = createMessageConnection(new StreamMessageReader(socket), new StreamMessageWriter(socket));
+      const l: Link = { conn, socket, closed: false };
+      socket.once("close", () => {
+        l.closed = true;
+        if (link === l) link = undefined;
+        conn.dispose();
+      });
+      conn.listen();
+      try {
+        const hello: HelloParams = {
+          protocolVersion: HOST_PROTOCOL_VERSION,
+          modelId: entry.id,
+          threads: opts.threads,
+          threadsExplicit: o.threadsExplicit ?? false,
+          offlineArchive: opts.offlineArchive,
+          proxy: opts.proxy,
+          clientId,
+          project: o.project,
+          active,
+        };
+        const r = await conn.sendRequest<HelloResult>("hello", hello);
+        if (r.dims !== info.dims) throw new Error(`host reports ${r.dims} dims, expected ${info.dims}`);
+      } catch (err) {
+        conn.dispose();
+        socket.destroy();
+        // a host that was just killed can still accept a connection and then drop it; only an answer is a refusal
+        const dropped = l.closed || (err instanceof ResponseError && DROPPED.includes(err.code));
+        if (dropped && Date.now() < deadline) continue;
+        return `embedding host rejected the connection: ${msg(err)}`;
+      }
+      return l;
     }
-    if (!socket) return `embedding host did not start; see ${logFile}`;
-    socket.on("error", () => {});
-    const conn = createMessageConnection(new StreamMessageReader(socket), new StreamMessageWriter(socket));
-    const l: Link = { conn, socket, closed: false };
-    socket.once("close", () => {
-      l.closed = true;
-      if (link === l) link = undefined;
-      conn.dispose();
-    });
-    conn.listen();
-    try {
-      const hello: HelloParams = {
-        protocolVersion: HOST_PROTOCOL_VERSION,
-        modelId: entry.id,
-        threads: opts.threads,
-        threadsExplicit: o.threadsExplicit ?? false,
-        offlineArchive: opts.offlineArchive,
-        proxy: opts.proxy,
-        clientId,
-        project: o.project,
-        active,
-      };
-      const r = await conn.sendRequest<HelloResult>("hello", hello);
-      if (r.dims !== info.dims) throw new Error(`host reports ${r.dims} dims, expected ${info.dims}`);
-    } catch (err) {
-      conn.dispose();
-      socket.destroy();
-      return `embedding host rejected the connection: ${msg(err)}`;
-    }
-    return l;
   };
 
   const backend = async (): Promise<Link | Embedder> => {

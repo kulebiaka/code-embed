@@ -322,6 +322,21 @@ describe("createHostEmbedder", () => {
     expect(spawns()).toHaveLength(1);
   });
 
+  it("starts a new host when a dying one drops the connection during hello", async () => {
+    const sock = hostSocket();
+    mkdirSync(dirname(sock), { recursive: true });
+    rmSync(sock, { force: true });
+    rogue = createServer((socket) => {
+      socket.destroy();
+      rogue!.close();
+    });
+    await new Promise<void>((r) => rogue!.listen(sock, r));
+    const a = make();
+    const [v] = await a.embedQueries(["after drop"]);
+    expect(vec(v)).toEqual(vec(fakeVector("after drop")));
+    expect(a.shared).toBe(true);
+  });
+
   describe("hello", () => {
     const hostLog = () => {
       const dirLogs = join(cache, "logs");
