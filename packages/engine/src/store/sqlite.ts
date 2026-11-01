@@ -7,6 +7,8 @@ import type {
   FileRecord,
   FtsHit,
   IndexStore,
+  RefHit,
+  RefRecord,
   StoreFilter,
   VecHit,
 } from "./types";
@@ -44,6 +46,16 @@ CREATE INDEX IF NOT EXISTS chunks_file ON chunks(file_id);
 CREATE INDEX IF NOT EXISTS chunks_embedded ON chunks(embedded);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, symbol, path, tokenize = 'unicode61 remove_diacritics 2');
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS refs (
+  chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  module TEXT
+);
+CREATE INDEX IF NOT EXISTS refs_name ON refs(name);
+CREATE INDEX IF NOT EXISTS refs_chunk ON refs(chunk_id);
+CREATE INDEX IF NOT EXISTS chunks_symbol ON chunks(symbol);
 `;
 
 const chunkSelect = (hasSignature: boolean): string => `SELECT c.id, c.file_id, f.path, f.lang, c.start_line, c.end_line, c.start_byte, c.end_byte,
@@ -340,6 +352,22 @@ class SqliteStore implements IndexStore {
       }
     }
     return out;
+  }
+
+  findDefinitions(): ChunkRecord[] {
+    throw new Error("not implemented: findDefinitions");
+  }
+
+  findRefs(): RefHit[] {
+    throw new Error("not implemented: findRefs");
+  }
+
+  refsOfChunk(): RefRecord[] {
+    throw new Error("not implemented: refsOfChunk");
+  }
+
+  importsOfFile(): RefRecord[] {
+    throw new Error("not implemented: importsOfFile");
   }
 
   counts(): { files: number; chunks: number; embedded: number } {
