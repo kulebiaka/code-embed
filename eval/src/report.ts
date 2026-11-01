@@ -11,6 +11,12 @@ export interface RunResult {
   createdAt: string;
   reports: RunReport[];
   nr10: Nr10 | null;
+  indexDb?: IndexDbSize;
+}
+
+export interface IndexDbSize {
+  totalBytes: number;
+  perRepo: Record<string, number>;
 }
 
 export interface Nr10 {
@@ -61,6 +67,7 @@ export function benchRow(model: string, reports: RunReport[]): BenchRow {
 }
 
 const f = (v: number | undefined, digits = 3) => (v === undefined ? "-" : v.toFixed(digits));
+const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(2);
 const metricCells = (m: EvalMetrics) => `${m.count} | ${f(m.recallAt10)} | ${f(m.mrr)}`;
 
 export function renderMarkdown(result: RunResult): string {
@@ -85,6 +92,12 @@ export function renderMarkdown(result: RunResult): string {
     for (const r of result.reports) {
       if (r.latencyMs) lines.push(`- search ${r.mode}: p50 ${f(r.latencyMs.p50, 1)} ms, p95 ${f(r.latencyMs.p95, 1)} ms`);
     }
+  }
+  if (result.indexDb) {
+    lines.push("", "## Index size (NR-02)", "");
+    lines.push("| Repository | index.db, MB |", "|---|---|");
+    for (const [repo, bytes] of Object.entries(result.indexDb.perRepo)) lines.push(`| ${repo} | ${mb(bytes)} |`);
+    lines.push(`| total | ${mb(result.indexDb.totalBytes)} |`);
   }
   lines.push("", "## NR-10", "");
   if (result.nr10) {
