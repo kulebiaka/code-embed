@@ -198,10 +198,81 @@ export interface LogParams {
   message: string;
 }
 
+export type Confidence = "high" | "low";
+
+export interface OutlineParams {
+  path: string;
+}
+export interface OutlineSymbol {
+  symbol: string | null;
+  parentSymbol: string | null;
+  kind: string;
+  signature: string | null;
+  range: LineRange;
+}
+export interface OutlineResponse {
+  path: string;
+  lang: string | null;
+  symbols: OutlineSymbol[];
+  tookMs: number;
+}
+
+export interface ReferencesParams {
+  symbol: string;
+  path?: string;
+}
+export type ReferenceRole = "definition" | "usage";
+export interface ReferenceItem {
+  role: ReferenceRole;
+  path: string;
+  lang: string | null;
+  range: LineRange;
+  line: number;
+  symbol: string | null;
+  kind: string;
+  confidence: Confidence;
+  text: string;
+}
+export interface ReferencesResponse {
+  symbol: string;
+  items: ReferenceItem[];
+  truncated: boolean;
+  tookMs: number;
+}
+
+export type ContextParams =
+  | { path: string; line: number; budgetTokens?: number }
+  | { query: string; budgetTokens?: number };
+export type ContextLevel = "target" | "callee" | "caller" | "test" | "similar" | "lexical";
+export interface ContextChunk {
+  level: ContextLevel;
+  path: string;
+  lang: string | null;
+  range: LineRange;
+  symbol: string | null;
+  kind: string;
+  text: string;
+  tokens: number;
+  confidence?: Confidence;
+}
+export interface ContextResponse {
+  chunks: ContextChunk[];
+  commits: string[];
+  budgetTokens: number;
+  usedTokens: number;
+  omitted: ContextLevel[];
+  partial: boolean;
+  partialReason?: string;
+  tookMs: number;
+}
+
 export const Methods = {
   initialize: "initialize",
   search: "search",
   findSimilar: "findSimilar",
+  outline: "symbols.outline",
+  references: "symbols.references",
+  context: "context",
   indexStatus: "index.status",
   indexRebuild: "index.rebuild",
   indexPause: "index.pause",
@@ -233,6 +304,9 @@ export interface EngineApi {
   initialize(p: InitializeParams): Promise<InitializeResult>;
   search(p: SearchParams, signal?: AbortSignal): Promise<SearchResponse>;
   findSimilar(p: FindSimilarParams, signal?: AbortSignal): Promise<SearchResponse>;
+  outline(p: OutlineParams, signal?: AbortSignal): Promise<OutlineResponse>;
+  references(p: ReferencesParams, signal?: AbortSignal): Promise<ReferencesResponse>;
+  context(p: ContextParams, signal?: AbortSignal): Promise<ContextResponse>;
   status(): Promise<IndexStatus>;
   rebuild(p?: RebuildParams): Promise<void>;
   pause(): Promise<void>;
