@@ -12,6 +12,21 @@ export interface Chunk {
   text: string;
 }
 
+export type RefKind = "call" | "type" | "import";
+
+export interface Ref {
+  name: string; // identifier as written; for imports: the imported binding name
+  kind: RefKind;
+  line: number; // 1-based, same convention as Chunk.startLine
+  byte: number; // start byte of the captured identifier in the file
+  module?: string; // imports only: TS/JS specifier without quotes ("./x", "pkg"); Python dotted path with leading dots (".x", "pkg.mod")
+}
+
+export interface ChunkResult {
+  chunks: Chunk[];
+  refs: Ref[];
+}
+
 export interface ChunkOptions {
   maxTokens: number;
   overlapRatio: number;

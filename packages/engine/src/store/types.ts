@@ -1,3 +1,5 @@
+import type { RefKind } from "../chunk/types";
+
 export interface FileRecord {
   id: number;
   path: string;
@@ -9,6 +11,22 @@ export interface FileRecord {
 }
 
 export type FileInput = Omit<FileRecord, "id" | "indexedAt">;
+
+export interface RefInput {
+  name: string;
+  kind: RefKind;
+  line: number;
+  module: string | null;
+}
+
+export interface RefRecord extends RefInput {
+  chunkId: number;
+}
+
+export interface RefHit {
+  ref: RefRecord;
+  chunk: ChunkRecord;
+}
 
 export interface ChunkInput {
   startLine: number;
@@ -23,6 +41,7 @@ export interface ChunkInput {
   text: string;
   // Already pre-tokenized with lex/tokenizeForFts.
   fts: { text: string; symbol: string; path: string };
+  refs?: RefInput[];
 }
 
 export interface ChunkRecord extends Omit<ChunkInput, "fts"> {
@@ -68,6 +87,10 @@ export interface IndexStore {
   searchFts(match: string, limit: number, filter?: StoreFilter): FtsHit[];
   searchVec(query: Int8Array, k: number, filter?: StoreFilter): VecHit[];
   getVectors(chunkIds: number[]): Map<number, Int8Array>;
+  findDefinitions(name: string, filter?: StoreFilter): ChunkRecord[];
+  findRefs(name: string, limit: number, filter?: StoreFilter): RefHit[];
+  refsOfChunk(chunkId: number): RefRecord[];
+  importsOfFile(fileId: number): RefRecord[];
   counts(): { files: number; chunks: number; embedded: number };
   getMeta(key: string): string | undefined;
   setMeta(key: string, value: string): void;
