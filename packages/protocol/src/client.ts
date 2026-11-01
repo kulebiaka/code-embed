@@ -72,6 +72,9 @@ export function createEngineProxy(conn: MessageConnection): EngineApi {
     initialize: (p) => request(Methods.initialize, p),
     search: (p, signal) => request(Methods.search, p, signal),
     findSimilar: (p, signal) => request(Methods.findSimilar, p, signal),
+    outline: (p, signal) => request(Methods.outline, p, signal),
+    references: (p, signal) => request(Methods.references, p, signal),
+    context: (p, signal) => request(Methods.context, p, signal),
     status: () => request(Methods.indexStatus),
     rebuild: (p) => request(Methods.indexRebuild, p ?? {}),
     pause: () => request(Methods.indexPause),
@@ -148,6 +151,9 @@ export function registerEngineHandlers(conn: MessageConnection, api: EngineApi):
   });
   handle(Methods.search, (p, s) => api.search(p as never, s));
   handle(Methods.findSimilar, (p, s) => api.findSimilar(p as never, s));
+  handle(Methods.outline, (p, s) => api.outline(p as never, s));
+  handle(Methods.references, (p, s) => api.references(p as never, s));
+  handle(Methods.context, (p, s) => api.context(p as never, s));
   handle(Methods.indexStatus, () => api.status());
   handle(Methods.indexRebuild, (p) => api.rebuild(p as never));
   handle(Methods.indexPause, () => api.pause());
