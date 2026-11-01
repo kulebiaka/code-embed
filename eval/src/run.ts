@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { createLocalEngine } from "../../packages/engine/src/engine/service";
 import { DEFAULT_MODEL_ID } from "../../packages/engine/src/embed/catalog";
+import { INDEX_DB } from "../../packages/engine/src/core/index-dir";
 import { modelsDir } from "../../packages/engine/src/core/paths";
 import { type QueryScore, TOP_K, aggregate, percentile, scoreQuery } from "./metrics";
 import { type RunReport, type RunResult, checkNr10, renderMarkdown, writeOutputs } from "./report";
@@ -52,6 +53,7 @@ export async function runEval(opts: RunOptions): Promise<RunResult> {
   const latencies = new Map<EvalMode, number[]>(opts.modes.map((m) => [m, []]));
   let indexSeconds = 0;
   let chunks = 0;
+  const indexDbBytes: Record<string, number> = {};
   try {
     for (const repo of opts.repos) {
       const root = path.join(opts.reposDir, repo.name);
@@ -66,11 +68,14 @@ export async function runEval(opts: RunOptions): Promise<RunResult> {
         watch: false,
         vectorPhase: false,
       });
+      let indexDir = "";
       try {
         const t0 = performance.now();
         await engine.indexAll({ full: true });
         indexSeconds += (performance.now() - t0) / 1000;
-        chunks += (await engine.status()).chunks;
+        const status = await engine.status();
+        chunks += status.chunks;
+        indexDir = status.indexDir;
 
         for (const mode of opts.modes) {
           for (const query of queries) {
@@ -88,6 +93,7 @@ export async function runEval(opts: RunOptions): Promise<RunResult> {
       } finally {
         await engine.close();
       }
+      indexDbBytes[repo.name] = statSync(path.join(indexDir, INDEX_DB)).size;
       console.error(`${repo.name}: ${queries.length} queries, ${modesLabel(opts.modes)}`);
     }
   } finally {
@@ -113,7 +119,8 @@ export async function runEval(opts: RunOptions): Promise<RunResult> {
       p95: percentile(latencies.get(mode) ?? [], 95),
     },
   }));
-  return { model: opts.model, createdAt, reports, nr10: checkNr10(reports) };
+  const indexDb = { totalBytes: Object.values(indexDbBytes).reduce((a, b) => a + b, 0), perRepo: indexDbBytes };
+  return { model: opts.model, createdAt, reports, nr10: checkNr10(reports), indexDb };
 }
 
 const modesLabel = (modes: EvalMode[]) => modes.join("/");
