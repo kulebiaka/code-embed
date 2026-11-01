@@ -44,7 +44,13 @@ function validate(schema: Schema, value: unknown): boolean {
 
 describe("tool contracts", () => {
   it("fixes tool names and top limit", () => {
-    expect(TOOL_NAMES).toEqual({ search: "search", findSimilar: "find_similar" });
+    expect(TOOL_NAMES).toEqual({
+      search: "search",
+      findSimilar: "find_similar",
+      outline: "outline",
+      references: "references",
+      context: "context",
+    });
     expect(MAX_TOOL_TOP).toBe(50);
   });
 

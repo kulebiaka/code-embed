@@ -1,6 +1,12 @@
 import type { SearchMode } from "./rpc";
 
-export const TOOL_NAMES = { search: "search", findSimilar: "find_similar" } as const;
+export const TOOL_NAMES = {
+  search: "search",
+  findSimilar: "find_similar",
+  outline: "outline",
+  references: "references",
+  context: "context",
+} as const;
 export const MAX_TOOL_TOP = 50;
 
 export interface SearchToolInput {
@@ -15,6 +21,19 @@ export interface SearchToolInput {
 export type FindSimilarToolInput =
   | { path: string; start_line: number; end_line: number; top?: number }
   | { code: string; lang?: string; top?: number };
+
+export interface OutlineToolInput {
+  path: string;
+}
+
+export interface ReferencesToolInput {
+  symbol: string;
+  path?: string;
+}
+
+export type ContextToolInput =
+  | { path: string; line: number; budget_tokens?: number }
+  | { query: string; budget_tokens?: number };
 
 const topSchema = {
   type: "integer",
