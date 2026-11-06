@@ -51,6 +51,36 @@ describe("mcp (R-112, R-113, R-114)", () => {
     }
   });
 
+  it("answers outline, references and context", async () => {
+    expect((await sb.run(["index"])).code).toBe(0);
+    const client = await connect(sb.root, sb.base);
+    try {
+      const outline = await client.callTool({ name: "outline", arguments: { path: "src/payment/refund.ts" } });
+      expect(outline.isError).toBeFalsy();
+      expect(textOf(outline)).toContain("calculateRefundAmount");
+
+      const refs = await client.callTool({ name: "references", arguments: { symbol: "calculateRefundAmount" } });
+      expect(refs.isError).toBeFalsy();
+      const refsText = textOf(refs);
+      expect(refsText).toContain("src/payment/refund.ts");
+      expect(refsText).toMatch(/high|low/);
+      expect(refsText).toContain("calculateRefundAmount(payment, request.amountCents)");
+
+      const byPath = await client.callTool({
+        name: "context",
+        arguments: { path: "src/payment/refund.ts", line: 64, budget_tokens: 2000 },
+      });
+      expect(byPath.isError).toBeFalsy();
+      expect(textOf(byPath)).toContain("processPaymentRefund");
+
+      const byQuery = await client.callTool({ name: "context", arguments: { query: "refund payment" } });
+      expect(byQuery.isError).toBeFalsy();
+      expect(textOf(byQuery).length).toBeGreaterThan(0);
+    } finally {
+      await client.close();
+    }
+  });
+
   it("works through a running daemon", async () => {
     expect((await sb.run(["index"])).code).toBe(0);
     expect((await sb.run(["daemon", "--detach"])).code).toBe(0);
