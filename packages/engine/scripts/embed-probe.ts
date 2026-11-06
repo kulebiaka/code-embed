@@ -69,7 +69,12 @@ async function main(): Promise<void> {
   const budgetMb = Number(
     arg("budget-mb") ?? (modelId === "qwen3-embedding-0.6b" ? 2200 : modelId === "bge-m3" ? 1024 : 700),
   );
-  const emb = createLocalEmbedder(getModel(modelId), { modelsDir: modelsDir(), threads });
+  const device = arg("device");
+  if (device !== undefined && device !== "coreml" && device !== "dml") {
+    console.error(`unknown device: ${device}`);
+    process.exit(2);
+  }
+  const emb = createLocalEmbedder(getModel(modelId), { modelsDir: modelsDir(), threads, device });
   await emb.init();
   const rssAfterInitMb = Math.round(process.memoryUsage().rss / 1048576);
   const texts = buildTexts(n);
@@ -86,6 +91,7 @@ async function main(): Promise<void> {
     JSON.stringify({
       model: modelId,
       threads,
+      device: device ?? null,
       texts: n,
       seconds: Math.round(seconds * 10) / 10,
       textsPerSec: Math.round((n / seconds) * 100) / 100,

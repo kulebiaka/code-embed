@@ -10,6 +10,7 @@ export interface LocalEmbedderOptions {
   dims?: number;
   offlineArchive?: string;
   proxy?: string;
+  device?: "coreml" | "dml";
 }
 
 export const LOCAL_MAX_INPUT_TOKENS = 1024;
@@ -160,6 +161,7 @@ export function createLocalEmbedder(entry: ModelEntry, opts: LocalEmbedderOption
     const plain = entry.files.some((f) => f.path.endsWith("/model.onnx"));
     model = await AutoModel.from_pretrained(entry.id, {
       dtype: plain ? "fp32" : entry.dtype,
+      ...(opts.device ? { device: opts.device } : {}),
       session_options: {
         intraOpNumThreads: opts.threads,
         interOpNumThreads: 1,
