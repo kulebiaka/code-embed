@@ -1,8 +1,9 @@
-import { Language, Parser, type Node } from "web-tree-sitter";
+import { Language, Parser, Query, type Node } from "web-tree-sitter";
 import { grammarPath } from "./assets";
 import { FUNCTION_VALUE_TYPES, LANGUAGES, type LangSpec, type UnitKind } from "./languages";
 import { splitText } from "./split";
-import type { Chunk, ChunkOptions } from "./types";
+import { refQuerySource } from "./tags";
+import type { Chunk, ChunkOptions, ChunkResult, Ref, RefKind } from "./types";
 
 const CLASS_MAX_LINES = 150;
 const BODY_TYPES = new Set(["function_body", "block", "statement_block", "compound_statement", "body_statement"]);
@@ -18,6 +19,9 @@ const DECLARATOR_WRAPPERS = new Set([
 
 let initPromise: Promise<void> | null = null;
 const parsers = new Map<string, Promise<Parser>>();
+const refQueries = new Map<string, Query | null>();
+
+const REF_KINDS: Record<string, RefKind> = { "ref.call": "call", "ref.type": "type", "ref.import": "import" };
 
 export function initTreeSitter(): Promise<void> {
   initPromise ??= Parser.init().catch((e) => {
@@ -179,7 +183,7 @@ class Chunker {
     return lo + 1;
   }
 
-  private byteAt(idx: number): number {
+  byteAt(idx: number): number {
     return this.byteTable ? this.byteTable[idx]! : idx;
   }
 
@@ -334,14 +338,45 @@ class Chunker {
   }
 }
 
-export async function chunkWithTreeSitter(lang: string, content: string, opts: ChunkOptions): Promise<Chunk[]> {
+function refQuery(lang: string, parser: Parser): Query | null {
+  if (refQueries.has(lang)) return refQueries.get(lang)!;
+  const source = refQuerySource(lang);
+  const q = source && parser.language ? new Query(parser.language, source) : null;
+  refQueries.set(lang, q);
+  return q;
+}
+
+function extractRefs(query: Query, root: Node, chunker: Chunker): Ref[] {
+  const refs: Ref[] = [];
+  for (const m of query.matches(root)) {
+    const module = m.captures.find((c) => c.name === "ref.module")?.node.text;
+    for (const c of m.captures) {
+      const kind = REF_KINDS[c.name];
+      if (!kind) continue;
+      const ref: Ref = {
+        name: c.node.text,
+        kind,
+        line: c.node.startPosition.row + 1,
+        byte: chunker.byteAt(c.node.startIndex),
+      };
+      if (kind === "import") ref.module = module ?? c.node.text;
+      refs.push(ref);
+    }
+  }
+  return refs.sort((a, b) => a.byte - b.byte);
+}
+
+export async function chunkWithTreeSitter(lang: string, content: string, opts: ChunkOptions): Promise<ChunkResult> {
   const spec = LANGUAGES[lang];
   if (!spec) throw new Error(`no grammar for language: ${lang}`);
   const parser = await getParser(lang);
   const tree = parser.parse(content);
   if (!tree) throw new Error(`parse failed for language: ${lang}`);
   try {
-    return new Chunker(content, spec, opts).run(tree.rootNode);
+    const chunker = new Chunker(content, spec, opts);
+    const chunks = chunker.run(tree.rootNode);
+    const query = refQuery(lang, parser);
+    return { chunks, refs: query ? extractRefs(query, tree.rootNode, chunker) : [] };
   } finally {
     tree.delete();
   }

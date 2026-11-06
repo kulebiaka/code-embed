@@ -26,7 +26,7 @@ async function prepare(
   const read = await readCandidate(file);
   if ("skip" in read) return "skip";
   if (!force && read.hash === existingHash) return "unchanged";
-  const chunks = await chunkFile(file.path, file.lang, read.content, ctx.chunkOptions);
+  const { chunks } = await chunkFile(file.path, file.lang, read.content, ctx.chunkOptions);
   const pathFts = tokenizeForFts(file.path);
   const inputs: ChunkInput[] = [];
   for (const c of chunks) {
