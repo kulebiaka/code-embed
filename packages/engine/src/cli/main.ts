@@ -11,9 +11,12 @@ import { run as exportCmd } from "./commands/export";
 import { run as gc } from "./commands/gc";
 import { run as importCmd } from "./commands/import";
 import { run as index } from "./commands/index-cmd";
+import { run as context } from "./commands/context";
 import { run as mcp } from "./commands/mcp";
 import { run as model } from "./commands/model";
+import { run as outline } from "./commands/outline";
 import { run as provider } from "./commands/provider";
+import { run as refs } from "./commands/refs";
 import { run as search } from "./commands/search";
 import { run as serve } from "./commands/serve";
 import { run as similar } from "./commands/similar";
@@ -23,6 +26,9 @@ import { EXIT, processIO, type CliIO, type CommandRun } from "./types";
 
 const COMMANDS: Record<string, CommandRun> = {
   similar,
+  outline,
+  refs,
+  context,
   index,
   status,
   daemon,

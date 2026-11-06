@@ -46,6 +46,18 @@ code-embed similar - [--lang ts] [OPTIONS]
 
 The first form finds code similar to a line range (1-based, inclusive); the second reads a fragment from stdin, with `--lang` setting its language. Accepts the common search options.
 
+## outline
+
+`code-embed outline <PATH> [--json]` prints the symbols of a file (kind, signature, line range).
+
+## refs
+
+`code-embed refs <SYMBOL> [--path PATH] [--json]` lists definitions and usages of a symbol by name; `--path` restricts definitions to one file.
+
+## context
+
+`code-embed context <PATH>:<LINE> | "<query>" [--budget N] [--json]` assembles the code around a location or a query within a token budget; `--budget` sets the budget in tokens (integer >= 1, default 4000).
+
 ## index
 
 ```
