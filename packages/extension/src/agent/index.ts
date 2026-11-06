@@ -2,11 +2,19 @@ import * as vscode from "vscode";
 import {
   EngineRpcError,
   ToolInputError,
+  formatContextForAgent,
   formatForAgent,
+  formatOutlineForAgent,
+  formatReferencesForAgent,
+  toContextParams,
   toFindSimilarParams,
+  toOutlineParams,
+  toReferencesParams,
   toSearchParams,
+  type ContextToolInput,
   type FindSimilarToolInput,
-  type SearchResponse,
+  type OutlineToolInput,
+  type ReferencesToolInput,
   type SearchToolInput,
 } from "@code-embed/protocol";
 import type { EngineClient } from "../engine/types";
@@ -30,8 +38,9 @@ function errorText(e: unknown): string {
   return `Code Embed error: ${e instanceof Error ? e.message : String(e)}`;
 }
 
-function tool<I>(
-  run: (input: I, signal: AbortSignal) => Promise<SearchResponse>,
+function tool<I, R>(
+  run: (input: I, signal: AbortSignal) => Promise<R>,
+  format: (resp: R) => string,
   message: (input: I) => string,
 ): vscode.LanguageModelTool<I> {
   return {
@@ -40,7 +49,7 @@ function tool<I>(
     },
     async invoke(options, token) {
       try {
-        return text(formatForAgent(await run(options.input, abortSignal(token))));
+        return text(format(await run(options.input, abortSignal(token))));
       } catch (e) {
         if (token.isCancellationRequested) throw e;
         return text(errorText(e));
@@ -53,16 +62,42 @@ export function registerAgentTools(ctx: vscode.ExtensionContext, client: EngineC
   ctx.subscriptions.push(
     vscode.lm.registerTool(
       "code-embed_search",
-      tool<SearchToolInput>(
-        (input, signal) => client.search(toSearchParams(input), signal),
+      tool(
+        (input: SearchToolInput, signal) => client.search(toSearchParams(input), signal),
+        (resp) => formatForAgent(resp),
         (input) => `Searching code: ${input?.query ?? ""}`,
       ),
     ),
     vscode.lm.registerTool(
       "code-embed_find_similar",
-      tool<FindSimilarToolInput>(
-        (input, signal) => client.findSimilar(toFindSimilarParams(input), signal),
+      tool(
+        (input: FindSimilarToolInput, signal) => client.findSimilar(toFindSimilarParams(input), signal),
+        (resp) => formatForAgent(resp),
         (input) => (input && "path" in input ? `Finding code similar to ${input.path}` : "Finding similar code"),
+      ),
+    ),
+    vscode.lm.registerTool(
+      "code-embed_outline",
+      tool(
+        (input: OutlineToolInput, signal) => client.outline(toOutlineParams(input), signal),
+        formatOutlineForAgent,
+        (input) => `Outlining ${input?.path ?? "file"}`,
+      ),
+    ),
+    vscode.lm.registerTool(
+      "code-embed_references",
+      tool(
+        (input: ReferencesToolInput, signal) => client.references(toReferencesParams(input), signal),
+        (resp) => formatReferencesForAgent(resp),
+        (input) => `Finding references: ${input?.symbol ?? ""}`,
+      ),
+    ),
+    vscode.lm.registerTool(
+      "code-embed_context",
+      tool(
+        (input: ContextToolInput, signal) => client.context(toContextParams(input), signal),
+        formatContextForAgent,
+        (input) => (input && "path" in input ? `Collecting context for ${input.path}:${input.line}` : `Collecting context: ${input?.query ?? ""}`),
       ),
     ),
   );

@@ -1,7 +1,13 @@
 import {
+  CONTEXT_TOOL_DESCRIPTION,
   FIND_SIMILAR_TOOL_DESCRIPTION,
+  OUTLINE_TOOL_DESCRIPTION,
+  REFERENCES_TOOL_DESCRIPTION,
   SEARCH_TOOL_DESCRIPTION,
+  contextToolInputSchema,
   findSimilarToolInputSchema,
+  outlineToolInputSchema,
+  referencesToolInputSchema,
   searchToolInputSchema,
 } from "@code-embed/protocol";
 import { describe, expect, it } from "vitest";
@@ -72,6 +78,19 @@ describe("extension manifest", () => {
     expect(similar!.modelDescription).toBe(FIND_SIMILAR_TOOL_DESCRIPTION);
     expect(search!.inputSchema).toEqual(searchToolInputSchema);
     expect(similar!.inputSchema).toEqual(findSimilarToolInputSchema);
+  });
+
+  it("declares the graph LM tools verbatim from the protocol package", () => {
+    const [, , outline, refs, context] = manifest.contributes.languageModelTools;
+    expect(outline).toMatchObject({ name: "code-embed_outline", toolReferenceName: "outline", canBeReferencedInPrompt: true });
+    expect(refs).toMatchObject({ name: "code-embed_references", toolReferenceName: "refs", canBeReferencedInPrompt: true });
+    expect(context).toMatchObject({ name: "code-embed_context", toolReferenceName: "context", canBeReferencedInPrompt: true });
+    expect(outline!.modelDescription).toBe(OUTLINE_TOOL_DESCRIPTION);
+    expect(refs!.modelDescription).toBe(REFERENCES_TOOL_DESCRIPTION);
+    expect(context!.modelDescription).toBe(CONTEXT_TOOL_DESCRIPTION);
+    expect(outline!.inputSchema).toEqual(outlineToolInputSchema);
+    expect(refs!.inputSchema).toEqual(referencesToolInputSchema);
+    expect(context!.inputSchema).toEqual(contextToolInputSchema);
   });
 
   it("declares the MCP server definition provider", () => {

@@ -496,6 +496,121 @@
           ],
           "additionalProperties": false
         }
+      },
+      {
+        "name": "code-embed_outline",
+        "toolReferenceName": "outline",
+        "displayName": "Code Embed: File Outline",
+        "userDescription": "List the symbols of a file with signatures and line ranges.",
+        "modelDescription": "List the symbols of one file from the local index: classes, functions, methods and other declarations with kind, signature, parent symbol and line range, ordered by position. Use it to get the structure of a file without reading it whole, then read only the lines you need. Takes a path relative to the workspace root. Returns an empty list if the file is not indexed.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "File path relative to the workspace root."
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "code-embed_references",
+        "toolReferenceName": "refs",
+        "displayName": "Code Embed: References",
+        "userDescription": "Find the definitions and usages of a symbol by name.",
+        "modelDescription": "Find where a symbol is defined and where it is used (calls, type references, imports) across the current workspace. Use it to answer \"who calls X\" or \"where is X used\" instead of grep. The lookup is name-based, from the local index: it matches identifiers by name and does not resolve scopes or types, so it is NOT a replacement for LSP (language server) find-references. Every item has a confidence, high or low; treat low-confidence items as candidates and verify them in the code. Optional path restricts definitions to one file. Returns definitions first, then usages (path, line range, line, kind, confidence, source line).",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Symbol name to look up, e.g. \"processRefund\" or \"PaymentService\"."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "File path relative to the workspace root; restricts definitions to this file."
+            }
+          },
+          "required": [
+            "symbol"
+          ],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "code-embed_context",
+        "toolReferenceName": "context",
+        "displayName": "Code Embed: Context",
+        "userDescription": "Collect the code around a location or query: callees, callers, tests, similar code.",
+        "modelDescription": "Collect the working context of a piece of code in one call: the target chunk plus its callees, callers, tests, similar code and recent commits of the file, ordered by priority and cut to a token budget. Pass either a location (path relative to the workspace root and line, 1-based) or a query (natural language or symbol name). Use it before changing code to see what it depends on and what depends on it. Optional budget_tokens sets the size limit of the answer; the default is 4000 tokens. Levels that did not fit in the budget are reported as omitted.",
+        "canBeReferencedInPrompt": true,
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "File path relative to the workspace root (use together with line)."
+            },
+            "line": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Line inside the target code, 1-based."
+            },
+            "query": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Natural-language description or symbol name of the target (use instead of path/line)."
+            },
+            "budget_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Token budget for the whole answer (default 4000)."
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "path",
+                "line"
+              ],
+              "not": {
+                "required": [
+                  "query"
+                ]
+              }
+            },
+            {
+              "required": [
+                "query"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "path"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "line"
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "additionalProperties": false
+        }
       }
     ],
     "mcpServerDefinitionProviders": [
