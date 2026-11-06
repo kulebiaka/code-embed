@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -24,6 +25,7 @@ afterEach(() => {
 });
 
 const call = (name: string, line: number): RefInput => ({ name, kind: "call", line, module: null });
+const typeRef = (name: string, line: number): RefInput => ({ name, kind: "type", line, module: null });
 
 let seq = 0;
 function chunk(over: Partial<ChunkInput> & { text: string }): ChunkInput {
@@ -193,6 +195,147 @@ describe("buildContext similar", () => {
     expect(r.chunks.map((c) => c.level)).toEqual(["target"]);
     expect(r.partial).toBe(true);
     expect(r.partialReason).toMatch(/vectors/);
+  });
+});
+
+describe("buildContext callees", () => {
+  const imp = (name: string, module: string): RefInput => ({ name, kind: "import", line: 1, module });
+
+  it("lists only high-confidence callees as signature plus the first 5 lines", async () => {
+    add("src/util.ts", "typescript", [
+      chunk({
+        symbol: "helper",
+        signature: "function helper(a: number): number",
+        text: "function helper(a: number): number {\n  1;\n  2;\n  3;\n  4;\n  5;\n  6;\n}",
+      }),
+    ]);
+    add("src/other.ts", "typescript", [chunk({ symbol: "stranger", text: "function stranger() {}" })]);
+    add("src/main.ts", "typescript", [
+      chunk({
+        symbol: "main",
+        text: "function main() {\n  helper(1);\n  stranger();\n}",
+        refs: [imp("helper", "./util"), call("helper", 2), call("stranger", 3)],
+      }),
+    ]);
+    const r = await buildContext(env(), { path: "src/main.ts", line: 1 });
+    const callees = r.chunks.filter((c) => c.level === "callee");
+    expect(callees).toHaveLength(1);
+    expect(callees[0]).toMatchObject({ symbol: "helper", confidence: "high" });
+    expect(callees[0]!.text).toBe("function helper(a: number): number\nfunction helper(a: number): number {\n  1;\n  2;\n  3;\n  4;");
+  });
+
+  it("uses only the lines when the definition has no signature", async () => {
+    add("src/main.ts", "typescript", [
+      chunk({ symbol: "main", text: "function main() {\n  helper();\n}", refs: [call("helper", 2)] }),
+      chunk({ symbol: "helper", startLine: 10, startByte: 100, endByte: 140, text: "function helper() {\n  a;\n  b;\n  c;\n  d;\n  e;\n}" }),
+    ]);
+    const r = await buildContext(env(), { path: "src/main.ts", line: 1 });
+    const callee = r.chunks.find((c) => c.level === "callee");
+    expect(callee!.text).toBe("function helper() {\n  a;\n  b;\n  c;\n  d;");
+  });
+
+  it("a method target sees calls from its body, a skeleton target only class-level refs", async () => {
+    add("src/h.ts", "typescript", [
+      chunk({ symbol: "inBody", text: "function inBody() {}" }),
+      chunk({ symbol: "atClass", startLine: 5, startByte: 200, endByte: 230, text: "function atClass() {}" }),
+    ]);
+    add("src/svc.ts", "typescript", [
+      chunk({
+        symbol: "Svc",
+        kind: "class",
+        text: "class Svc {\n  run() {\n    inBody();\n  }\n}",
+        startByte: 0,
+        endByte: 100,
+        refs: [imp("inBody", "./h"), imp("atClass", "./h"), call("atClass", 1)],
+      }),
+      chunk({
+        symbol: "run",
+        parentSymbol: "Svc",
+        text: "  run() {\n    inBody();\n  }",
+        startLine: 2,
+        startByte: 12,
+        endByte: 40,
+        refs: [imp("inBody", "./h"), call("inBody", 3)],
+      }),
+    ]);
+    const method = await buildContext(env(), { path: "src/svc.ts", line: 3 });
+    const skeleton = await buildContext(env(), { path: "src/svc.ts", line: 1 });
+    expect(method.chunks.filter((c) => c.level === "callee").map((c) => c.symbol)).toEqual(["inBody"]);
+    expect(skeleton.chunks.filter((c) => c.level === "callee").map((c) => c.symbol)).toEqual(["atClass"]);
+  });
+});
+
+describe("buildContext tests level", () => {
+  it("takes up to 5 chunks from test-pattern files that reference the symbol", async () => {
+    add("src/t.ts", "typescript", [chunk({ symbol: "refund", text: "function refund() {}" })]);
+    const paths = [
+      "src/a.test.ts",
+      "src/b_test.go",
+      "pkg/test_c.py",
+      "tests/d.ts",
+      "tests/sub/e.ts",
+      "src/f.test.ts",
+      "src/g.test.ts",
+      "src/plain.ts",
+      "src/contest.ts",
+    ];
+    for (const [i, path] of paths.entries()) {
+      add(path, path.endsWith(".py") ? "python" : "typescript", [
+        chunk({ symbol: `t${i}`, text: `it("x", () => refund(${i}))`, refs: [typeRef("refund", 1)] }),
+      ]);
+    }
+    const r = await buildContext(env(), { path: "src/t.ts", line: 1, budgetTokens: 100000 });
+    const testPaths = r.chunks.filter((c) => c.level === "test").map((c) => c.path);
+    expect(testPaths).toEqual(["pkg/test_c.py", "src/a.test.ts", "src/b_test.go", "src/f.test.ts", "src/g.test.ts"]);
+  });
+
+  it("matches every pattern", async () => {
+    add("src/t.ts", "typescript", [chunk({ symbol: "refund", text: "function refund() {}" })]);
+    const paths = ["src/a.test.ts", "src/b_test.go", "pkg/test_c.py", "tests/d.ts", "src/plain.ts", "src/contest.ts"];
+    for (const [i, path] of paths.entries()) {
+      add(path, "typescript", [chunk({ symbol: `t${i}`, text: `refund(${i})`, refs: [typeRef("refund", 1)] })]);
+    }
+    const r = await buildContext(env(), { path: "src/t.ts", line: 1 });
+    const testPaths = r.chunks.filter((c) => c.level === "test").map((c) => c.path);
+    expect(testPaths).toEqual(["pkg/test_c.py", "src/a.test.ts", "src/b_test.go", "tests/d.ts"]);
+  });
+});
+
+describe("buildContext commits", () => {
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, stdio: "pipe" });
+
+  function commitTimes(n: number) {
+    git("init", "-q");
+    mkdirSync(join(dir, "src"));
+    for (let i = 0; i < n; i++) {
+      writeFileSync(join(dir, "src/target.ts"), `v${i}`);
+      git("add", "src/target.ts");
+      git("commit", "-q", "-m", `change ${i}`);
+    }
+  }
+
+  it("lists up to 5 recent commits of the target file", async () => {
+    add("src/target.ts", "typescript", [chunk({ symbol: "refund", text: "function refund() {}" })]);
+    commitTimes(7);
+    const r = await buildContext(env(), { path: "src/target.ts", line: 1 });
+    expect(r.commits).toHaveLength(5);
+    expect(r.commits[0]).toMatch(/^[0-9a-f]{7,} \d{4}-\d{2}-\d{2} change 6$/);
+    expect(r.usedTokens).toBe(r.chunks.reduce((n, c) => n + c.tokens, 0) + r.commits.reduce((n, c) => n + tokens(c), 0));
+  });
+
+  it("drops commits when the target alone exceeds the budget", async () => {
+    add("src/target.ts", "typescript", [chunk({ symbol: "refund", text: "function refund() {}" })]);
+    commitTimes(1);
+    const r = await buildContext(env(), { path: "src/target.ts", line: 1, budgetTokens: 1 });
+    expect(r.commits).toEqual([]);
+  });
+
+  it("returns no commits without error when git cannot run", async () => {
+    add("src/target.ts", "typescript", [chunk({ symbol: "refund", text: "function refund() {}" })]);
+    const r = await buildContext(env({ root: join(dir, "missing") }), { path: "src/target.ts", line: 1 });
+    expect(r.commits).toEqual([]);
+    expect(r.chunks[0]!.level).toBe("target");
   });
 });
 

@@ -1,8 +1,9 @@
+import { execFile } from "node:child_process";
 import type { ContextChunk, ContextLevel, ContextParams, ContextResponse, SearchResult } from "@code-embed/protocol";
 import { REF_LANGS } from "../chunk/tags";
 import { DEFAULT_CHUNK_OPTIONS } from "../chunk/types";
 import type { ChunkRecord } from "../store/types";
-import { callersOf } from "./graph";
+import { calleesOf, callersOf } from "./graph";
 import { search } from "./hybrid";
 import { lexicalCandidates } from "./lexical";
 import { findSimilar } from "./similar";
@@ -16,14 +17,30 @@ const DEFAULT_BUDGET = 4000;
 const MAX_CALLERS = 5;
 const MAX_SIMILAR = 3;
 const MAX_LEXICAL = 10;
+const MAX_TESTS = 5;
+const MAX_COMMITS = 5;
+const CALLEE_LINES = 5;
 const CALLER_POOL = 1000;
+const TEST_POOL = 100_000;
+const TEST_PATH = /(^|\/)(tests\/|test_[^/]*\.py$)|\.test\.|_test\./;
+
+function recentCommits(root: string, path: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    execFile(
+      "git",
+      ["log", "-n", String(MAX_COMMITS), "--format=%h %ad %s", "--date=short", "--", path],
+      { cwd: root, maxBuffer: 1024 * 1024, timeout: 15_000 },
+      (err, stdout) => resolve(err ? [] : stdout.split("\n").filter(Boolean)),
+    );
+  });
+}
 
 interface Candidate {
   id: number;
   chunk: ContextChunk;
 }
 
-function candidate(level: ContextLevel, c: ChunkRecord, confidence?: ContextChunk["confidence"]): Candidate {
+function candidate(level: ContextLevel, c: ChunkRecord, confidence?: ContextChunk["confidence"], text = c.text): Candidate {
   const chunk: ContextChunk = {
     level,
     path: c.path,
@@ -31,8 +48,8 @@ function candidate(level: ContextLevel, c: ChunkRecord, confidence?: ContextChun
     range: { startLine: c.startLine, endLine: c.endLine },
     symbol: c.symbol,
     kind: c.kind,
-    text: c.text,
-    tokens: DEFAULT_CHUNK_OPTIONS.countTokens(c.text),
+    text,
+    tokens: DEFAULT_CHUNK_OPTIONS.countTokens(text),
   };
   if (confidence) chunk.confidence = confidence;
   return { id: c.id, chunk };
@@ -104,6 +121,17 @@ export async function buildContext(env: ContextEnv, p: ContextParams, signal?: A
   let lexical: Candidate[] = [];
 
   if (hasGraph) {
+    const callees: Candidate[] = [];
+    const calleeSeen = new Set<number>([target.id]);
+    for (const r of calleesOf(store, target.id)) {
+      const d = r.definition;
+      if (r.confidence !== "high" || calleeSeen.has(d.id)) continue;
+      calleeSeen.add(d.id);
+      const head = d.text.split("\n").slice(0, CALLEE_LINES).join("\n");
+      callees.push(candidate("callee", d, "high", d.signature ? `${d.signature}\n${head}` : head));
+    }
+    addLevel("callee", callees);
+
     if (symbol) {
       const callers: Candidate[] = [];
       const picked = new Set<number>();
@@ -114,6 +142,16 @@ export async function buildContext(env: ContextEnv, p: ContextParams, signal?: A
         callers.push(candidate("caller", r.chunk, r.confidence));
       }
       addLevel("caller", callers);
+
+      const tests: Candidate[] = [];
+      const testSeen = new Set<number>();
+      for (const h of store.findRefs(symbol, TEST_POOL)) {
+        if (tests.length >= MAX_TESTS) break;
+        if (!TEST_PATH.test(h.chunk.path) || h.chunk.id === target.id || testSeen.has(h.chunk.id)) continue;
+        testSeen.add(h.chunk.id);
+        tests.push(candidate("test", h.chunk));
+      }
+      addLevel("test", tests);
     }
   } else if (symbol) {
     const ids = lexicalCandidates(store, symbol, MAX_LEXICAL + 1, {}, undefined, signal).map((h) => h.id);
@@ -150,9 +188,19 @@ export async function buildContext(env: ContextEnv, p: ContextParams, signal?: A
 
   addLevel("lexical", lexical);
 
+  const commits: string[] = [];
+  if (used < budget) {
+    for (const line of await recentCommits(env.root, target.path)) {
+      const t = DEFAULT_CHUNK_OPTIONS.countTokens(line);
+      if (used + t > budget) break;
+      commits.push(line);
+      used += t;
+    }
+  }
+
   const response: ContextResponse = {
     chunks,
-    commits: [],
+    commits,
     budgetTokens: budget,
     usedTokens: used,
     omitted,
