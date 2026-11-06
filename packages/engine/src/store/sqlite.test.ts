@@ -112,6 +112,14 @@ describe("vectors", () => {
     expect(store.chunksForFile("a.ts")).toHaveLength(3);
   });
 
+  it("pendingChunks orders by incoming degree of the symbol, then id", () => {
+    const ref = (name: string) => ({ name, kind: "call" as const, line: 1, module: null });
+    store.upsertFile(file("a.ts"), [chunk("plain", "", "a.ts", 0), chunk("one", "one", "a.ts", 1), chunk("two", "two", "a.ts", 2)]);
+    store.upsertFile(file("b.ts"), [{ ...chunk("caller", "", "b.ts", 0), refs: [ref("two"), ref("two"), ref("one")] }]);
+    expect(store.pendingChunks(10).map((c) => c.symbol)).toEqual(["two", "one", null, null]);
+    expect(store.pendingChunks(10, ["a.ts"]).map((c) => c.symbol)).toEqual(["two", "one", null]);
+  });
+
   it("filters kNN and removes vectors with replaced chunks", () => {
     const a = store.upsertFile(file("src/a.ts"), [chunk("a", "", "src/a.ts")]);
     const b = store.upsertFile(file("lib/b.py", "py"), [chunk("b", "", "lib/b.py")]);
