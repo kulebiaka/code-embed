@@ -177,7 +177,7 @@ const bytesMatch = (code: string, c: Chunk) => Buffer.from(code).subarray(c.star
 describe("chunkWithTreeSitter per language", () => {
   for (const { lang, code, expected } of FRAGMENTS) {
     it(`${lang}: units, symbols, parents, lines and bytes`, async () => {
-      const chunks = await chunkWithTreeSitter(lang, code, opts(20));
+      const { chunks } = await chunkWithTreeSitter(lang, code, opts(20));
       for (const exp of expected) {
         const found = chunks.find(
           (c) => c.kind === exp.kind && c.symbol === exp.symbol && c.parentSymbol === exp.parentSymbol && c.startLine === exp.startLine,
@@ -194,13 +194,13 @@ describe("chunkWithTreeSitter behavior", () => {
   const classCode = `export class Big {\n  private a = 1;\n  first(x: number): number {\n    return x * 2 + this.a;\n  }\n  second(y: string): string {\n    return y.repeat(3);\n  }\n}\n`;
 
   it("small class stays whole", async () => {
-    const chunks = await chunkWithTreeSitter("typescript", classCode, opts(400));
+    const { chunks } = await chunkWithTreeSitter("typescript", classCode, opts(400));
     expect(chunks).toHaveLength(1);
     expect(chunks[0]!.text).toBe(classCode.trimEnd());
   });
 
   it("class over maxTokens becomes skeleton plus method chunks", async () => {
-    const chunks = await chunkWithTreeSitter("typescript", classCode, opts(30));
+    const { chunks } = await chunkWithTreeSitter("typescript", classCode, opts(30));
     const skeleton = chunks.find((c) => c.kind === "class")!;
     expect(skeleton.text).toContain("private a = 1;");
     expect(skeleton.text).toContain("first(x: number): number");
@@ -212,7 +212,7 @@ describe("chunkWithTreeSitter behavior", () => {
   it("class over 150 lines becomes skeleton even when tokens fit", async () => {
     const body = Array.from({ length: 80 }, (_, i) => `  m${i}() {\n    return ${i};\n  }`).join("\n");
     const code = `class Long {\n${body}\n}\n`;
-    const chunks = await chunkWithTreeSitter("typescript", code, opts(100000));
+    const { chunks } = await chunkWithTreeSitter("typescript", code, opts(100000));
     expect(chunks.filter((c) => c.kind === "method")).toHaveLength(80);
     expect(chunks.find((c) => c.kind === "class")!.text).not.toContain("return 5;");
   });
@@ -221,7 +221,7 @@ describe("chunkWithTreeSitter behavior", () => {
     const lines = Array.from({ length: 200 }, (_, i) => `  total += compute(${i});`).join("\n");
     const code = `function big() {\n  let total = 0;\n${lines}\n  return total;\n}\n`;
     const o = opts(100);
-    const chunks = await chunkWithTreeSitter("typescript", code, o);
+    const { chunks } = await chunkWithTreeSitter("typescript", code, o);
     expect(chunks.length).toBeGreaterThan(5);
     for (const c of chunks) {
       expect(c.symbol).toBe("big");
@@ -237,7 +237,7 @@ describe("chunkWithTreeSitter behavior", () => {
 
   it("keeps non-unit code as module chunks without losing it", async () => {
     const code = `import a from "a";\nconst x = 1;\nfunction f() {\n  return x;\n}\nconsole.log(f());\n`;
-    const chunks = await chunkWithTreeSitter("typescript", code, opts(400));
+    const { chunks } = await chunkWithTreeSitter("typescript", code, opts(400));
     expect(chunks.map((c) => c.kind)).toEqual(["module", "function", "module"]);
     expect(chunks[0]!.text).toBe('import a from "a";\nconst x = 1;');
     expect(chunks[2]!.text).toBe("console.log(f());");
@@ -245,7 +245,7 @@ describe("chunkWithTreeSitter behavior", () => {
 
   it("byte offsets are UTF-8 for non-ASCII content", async () => {
     const code = `const s = "приветик 🌍";\nfunction привет() {\n  return "мир";\n}\n`;
-    const chunks = await chunkWithTreeSitter("typescript", code, opts(400));
+    const { chunks } = await chunkWithTreeSitter("typescript", code, opts(400));
     const fn = chunks.find((c) => c.kind === "function")!;
     expect(fn.startLine).toBe(2);
     expect(bytesMatch(code, fn)).toBe(true);
@@ -253,7 +253,7 @@ describe("chunkWithTreeSitter behavior", () => {
   });
 
   it("returns no chunks for empty content", async () => {
-    expect(await chunkWithTreeSitter("python", "\n\n", opts(400))).toEqual([]);
+    expect((await chunkWithTreeSitter("python", "\n\n", opts(400))).chunks).toEqual([]);
   });
 
   it("rejects unknown languages", async () => {
@@ -269,7 +269,7 @@ describe("chunkWithTreeSitter behavior", () => {
     expect(code.split("\n").length).toBeGreaterThanOrEqual(10000);
     await chunkWithTreeSitter("typescript", "function warm() {}", opts(400));
     const t0 = performance.now();
-    const chunks = await chunkWithTreeSitter("typescript", code, opts(400));
+    const { chunks } = await chunkWithTreeSitter("typescript", code, opts(400));
     expect(performance.now() - t0).toBeLessThan(1000);
     expect(chunks.filter((c) => c.kind === "function")).toHaveLength(1000);
   });

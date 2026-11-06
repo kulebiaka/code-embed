@@ -53,26 +53,34 @@ describe("initChunker", () => {
 
 describe("chunkFile", () => {
   it("uses tree-sitter for languages with a grammar", async () => {
-    const chunks = await chunkFile("a.py", "python", "def f():\n    return 1\n");
+    const { chunks } = await chunkFile("a.py", "python", "def f():\n    return 1\n");
     expect(chunks.map((c) => [c.kind, c.symbol])).toEqual([["function", "f"]]);
     expect(chunkWindows).not.toHaveBeenCalled();
   });
 
   it("routes markdown to chunkMarkdown with the options", async () => {
     const opts = { ...DEFAULT_CHUNK_OPTIONS, maxTokens: 123 };
-    expect(await chunkFile("a.md", "markdown", "# T", opts)).toEqual([stub]);
+    expect(await chunkFile("a.md", "markdown", "# T", opts)).toEqual({ chunks: [stub], refs: [] });
     expect(chunkMarkdown).toHaveBeenCalledWith("# T", opts);
   });
 
   it("falls back to windows for unknown or missing language", async () => {
-    expect(await chunkFile("a.xyz", "cobol", "data")).toEqual([stub]);
-    expect(await chunkFile("a", null, "data")).toEqual([stub]);
+    expect(await chunkFile("a.xyz", "cobol", "data")).toEqual({ chunks: [stub], refs: [] });
+    expect(await chunkFile("a", null, "data")).toEqual({ chunks: [stub], refs: [] });
     expect(chunkWindows).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns refs from tree-sitter and none for a language without queries", async () => {
+    const py = await chunkFile("a.py", "python", "def f():\n    g()\n");
+    expect(py.refs.map((r) => [r.name, r.kind])).toEqual([["g", "call"]]);
+    const go = await chunkFile("a.go", "go", "package a\nfunc f() { g() }\n");
+    expect(go.chunks.length).toBeGreaterThan(0);
+    expect(go.refs).toEqual([]);
   });
 
   it("falls back to windows when tree-sitter fails", async () => {
     vi.mocked(chunkWithTreeSitter).mockRejectedValueOnce(new Error("boom"));
-    expect(await chunkFile("a.go", "go", "package a")).toEqual([stub]);
+    expect(await chunkFile("a.go", "go", "package a")).toEqual({ chunks: [stub], refs: [] });
     expect(chunkWindows).toHaveBeenCalledWith("package a");
   });
 });
