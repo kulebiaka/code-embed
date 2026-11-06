@@ -94,6 +94,54 @@ describe("vector phase", () => {
     await phase.stop();
   });
 
+  describe("incoming degree order", () => {
+    const callRefs = (name: string, n: number) =>
+      Array.from({ length: n }, (_, i) => ({ name, kind: "call" as const, line: i + 1, module: null }));
+    const addSym = (path: string, text: string, symbol: string | null, refs: { name: string; n: number }[] = []) =>
+      store.upsertFile({ path, lang: "ts", size: 1, mtime: 1, contentHash: `c-${path}` }, [
+        { ...chunk(text), symbol, refs: refs.flatMap((r) => callRefs(r.name, r.n)) },
+      ]);
+    const run = async (prioritized: string[] = []) => {
+      const emb = new FakeEmbedder({ dims: 8 });
+      const spy = vi.spyOn(emb, "embedDocuments");
+      const phase = createVectorPhase({ ctx, embCache: cache, embedder: emb, batchSize: 1 });
+      if (prioritized.length) phase.prioritize(prioritized.map((p) => join(dir, p)));
+      phase.start();
+      await phase.whenIdle();
+      return spy.mock.calls.flatMap((c) => c[0]).map((t) => /text-(\w+)/.exec(t)![1]!);
+    };
+
+    it("embeds a heavily referenced chunk beyond the first group before unreferenced ones", async () => {
+      for (let i = 0; i < 20; i++) addSym(`f${String(i).padStart(2, "0")}.ts`, `text-p${i}`, null);
+      addSym("g.ts", "text-hot", "hot");
+      addSym("h.ts", "text-caller", null, [{ name: "hot", n: 3 }]);
+      const order = await run();
+      expect(order[0]).toBe("hot");
+    });
+
+    it("orders chunks by degree among the rest", async () => {
+      addSym("a.ts", "text-low", "low");
+      addSym("b.ts", "text-mid", "mid");
+      addSym("c.ts", "text-high", "high");
+      addSym("d.ts", "text-callers", null, [
+        { name: "low", n: 1 },
+        { name: "mid", n: 2 },
+        { name: "high", n: 3 },
+      ]);
+      const order = await run();
+      expect(order.slice(0, 3)).toEqual(["high", "mid", "low"]);
+    });
+
+    it("keeps opened files ahead of chunks with a higher degree", async () => {
+      addSym("hot.ts", "text-hot", "hot");
+      addSym("callers.ts", "text-callers", null, [{ name: "hot", n: 5 }]);
+      addSym("x/y/opened.ts", "text-opened", "cold");
+      const order = await run(["x/y/opened.ts"]);
+      expect(order[0]).toBe("opened");
+      expect(order[1]).toBe("hot");
+    });
+  });
+
   it("embeds everything, sets dims, dedups by chunk_hash", async () => {
     addFile("a.ts", ["one", "two", "one"]);
     addFile("b.ts", ["one", "three"]);
