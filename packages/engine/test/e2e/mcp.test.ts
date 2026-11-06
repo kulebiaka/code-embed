@@ -34,6 +34,7 @@ describe("mcp (R-112, R-113, R-114)", () => {
       const names = tools.map((t) => t.name);
       expect(names).toContain("search");
       expect(names).toContain("find_similar");
+      expect(names).toEqual(expect.arrayContaining(["outline", "references", "context"]));
 
       const res = await client.callTool({ name: "search", arguments: { query: "refund payment" } });
       expect(res.isError).toBeFalsy();
