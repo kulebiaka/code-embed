@@ -24,6 +24,8 @@ export interface SearchFlags {
   allowRemote: boolean;
   help: boolean;
   version: boolean;
+  path?: string;
+  budget?: number;
 }
 
 export interface ParsedSearch {
@@ -61,10 +63,11 @@ function intOption(name: string, raw: string | undefined, min: number): number |
   return n;
 }
 
-export function parseSearchArgs(argv: string[]): ParsedSearch {
+export function parseSearchArgs(argv: string[], extra?: "path" | "budget"): ParsedSearch {
+  const options = extra ? { ...OPTIONS, [extra]: { type: "string" } } : OPTIONS;
   let parsed;
   try {
-    parsed = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true });
+    parsed = parseArgs({ args: argv, options, allowPositionals: true, strict: true });
   } catch (e) {
     throw new UsageError(e instanceof Error ? e.message : String(e));
   }
@@ -108,6 +111,8 @@ export function parseSearchArgs(argv: string[]): ParsedSearch {
       allowRemote: v["allow-remote"] ?? false,
       help: v.help ?? false,
       version: v.version ?? false,
+      path: extra === "path" ? ((v as Record<string, unknown>).path as string | undefined) : undefined,
+      budget: extra === "budget" ? intOption("budget", (v as Record<string, unknown>).budget as string | undefined, 1) : undefined,
     },
   };
 }
@@ -125,6 +130,9 @@ export const USAGE = `Usage:
   code-embed [OPTIONS] <QUERY>
   code-embed similar <PATH>:<START>-<END> [OPTIONS]
   code-embed similar - [--lang ts] [OPTIONS]
+  code-embed outline <PATH> [--json]
+  code-embed refs <SYMBOL> [--path PATH] [--json]
+  code-embed context <PATH>:<LINE> | "<query>" [--budget N] [--json]
   code-embed index [--watch] [--full]
   code-embed status | stop | gc | clean
   code-embed daemon [--detach]
