@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { openEmbCache } from "../cache/embcache";
+import { FakeEmbedder } from "../embed/fake";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +14,7 @@ import type { EffectiveSettings } from "../config/types";
 import { DEFAULT_CHUNK_OPTIONS } from "../chunk/types";
 import { runLexical } from "./lexical";
 import { openIndex } from "./open";
+import { createVectorPhase } from "./vector";
 
 const testSettings: EffectiveSettings = {
   indexLocation: "project",
@@ -96,6 +99,45 @@ describe("openIndex", () => {
     expect(readMeta(dir)?.chunker_version).toBe(CHUNKER_VERSION);
     b.store.close();
     b.lock?.release();
+  });
+
+  it("schema version rebuild reuses cached vectors without re-embedding (NR-04)", async () => {
+    const emb = new FakeEmbedder({ dims: 8 });
+    const a = await openIndex(root, testSettings, { expectedModelId: emb.info.modelId, dims: 8 });
+    const cache = openEmbCache(join(dir, "emb.db"));
+    const ctx = {
+      root,
+      indexDir: dir,
+      store: a.store,
+      settings: testSettings,
+      chunkOptions: DEFAULT_CHUNK_OPTIONS,
+      onProgress: () => {},
+      onError: () => {},
+    };
+    await runLexical(ctx);
+    const first = createVectorPhase({ ctx, embCache: cache, embedder: emb });
+    first.start();
+    await first.whenIdle();
+    await first.stop();
+    expect(a.store.counts().embedded).toBeGreaterThan(0);
+    a.store.close();
+    a.lock?.release();
+    writeMeta(dir, { ...readMeta(dir)!, schema_version: 2 });
+
+    const b = await openIndex(root, testSettings, { expectedModelId: emb.info.modelId, dims: 8 });
+    expect(b.rebuildReason).toMatch(/schema/);
+    expect(b.store.counts().embedded).toBe(0);
+    const spy = vi.spyOn(emb, "embedDocuments");
+    const second = createVectorPhase({ ctx: { ...ctx, store: b.store }, embCache: cache, embedder: emb });
+    second.start();
+    await second.whenIdle();
+    await second.stop();
+    expect(spy).not.toHaveBeenCalled();
+    const counts = b.store.counts();
+    expect(counts.embedded).toBe(counts.chunks);
+    b.store.close();
+    b.lock?.release();
+    cache.close();
   });
 
   it("model change keeps lexical and resets vectors", async () => {
