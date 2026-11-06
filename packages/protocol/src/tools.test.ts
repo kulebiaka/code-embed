@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONTEXT_TOOL_DESCRIPTION,
   FIND_SIMILAR_TOOL_DESCRIPTION,
   MAX_TOOL_TOP,
+  OUTLINE_TOOL_DESCRIPTION,
+  REFERENCES_TOOL_DESCRIPTION,
   SEARCH_TOOL_DESCRIPTION,
   TOOL_NAMES,
+  contextToolInputSchema,
   findSimilarToolInputSchema,
+  outlineToolInputSchema,
+  referencesToolInputSchema,
   searchToolInputSchema,
 } from "./tools";
 
@@ -106,7 +112,68 @@ describe("tool contracts", () => {
     expect(SEARCH_TOOL_DESCRIPTION).toMatch(/instead of grep/);
     expect(SEARCH_TOOL_DESCRIPTION).toMatch(/Do NOT use/);
     expect(SEARCH_TOOL_DESCRIPTION).toMatch(/Russian/);
-    expect(FIND_SIMILAR_TOOL_DESCRIPTION).toMatch(/grep/);
     expect(FIND_SIMILAR_TOOL_DESCRIPTION).toMatch(/Do NOT use/);
+  });
+
+  it("search and find_similar route callers to references and surroundings to context", () => {
+    for (const d of [SEARCH_TOOL_DESCRIPTION, FIND_SIMILAR_TOOL_DESCRIPTION]) {
+      expect(d).toMatch(/references/);
+      expect(d).toMatch(/context/);
+      expect(d).not.toMatch(/language server/);
+    }
+    expect(FIND_SIMILAR_TOOL_DESCRIPTION).not.toMatch(/grep/);
+    expect(SEARCH_TOOL_DESCRIPTION).not.toMatch(/list every usage/);
+  });
+
+  it("outline schema requires a path", () => {
+    expect(validate(outlineToolInputSchema, { path: "src/a.ts" })).toBe(true);
+    expect(validate(outlineToolInputSchema, {})).toBe(false);
+    expect(validate(outlineToolInputSchema, { path: "" })).toBe(false);
+    expect(validate(outlineToolInputSchema, { path: "a", x: 1 })).toBe(false);
+  });
+
+  it("references schema requires a symbol and takes an optional path", () => {
+    expect(validate(referencesToolInputSchema, { symbol: "foo" })).toBe(true);
+    expect(validate(referencesToolInputSchema, { symbol: "foo", path: "src/a.ts" })).toBe(true);
+    expect(validate(referencesToolInputSchema, {})).toBe(false);
+    expect(validate(referencesToolInputSchema, { symbol: "" })).toBe(false);
+    expect(validate(referencesToolInputSchema, { symbol: "foo", extra: 1 })).toBe(false);
+  });
+
+  it("context schema accepts either location or query", () => {
+    expect(validate(contextToolInputSchema, { path: "src/a.ts", line: 10 })).toBe(true);
+    expect(validate(contextToolInputSchema, { query: "refund flow", budget_tokens: 2000 })).toBe(true);
+    expect(validate(contextToolInputSchema, { path: "a", line: 1, budget_tokens: 1 })).toBe(true);
+  });
+
+  it("context schema rejects mixed, incomplete or invalid forms", () => {
+    expect(validate(contextToolInputSchema, {})).toBe(false);
+    expect(validate(contextToolInputSchema, { path: "a" })).toBe(false);
+    expect(validate(contextToolInputSchema, { line: 3 })).toBe(false);
+    expect(validate(contextToolInputSchema, { path: "a", line: 1, query: "x" })).toBe(false);
+    expect(validate(contextToolInputSchema, { query: "x", line: 1 })).toBe(false);
+    expect(validate(contextToolInputSchema, { query: "x", budget_tokens: 0 })).toBe(false);
+    expect(validate(contextToolInputSchema, { query: "x", budget_tokens: 1.5 })).toBe(false);
+    expect(validate(contextToolInputSchema, { path: "a", line: 0 })).toBe(false);
+  });
+
+  it("new schemas are plain JSON data", () => {
+    for (const s of [outlineToolInputSchema, referencesToolInputSchema, contextToolInputSchema]) {
+      expect(JSON.parse(JSON.stringify(s))).toEqual(s);
+    }
+  });
+
+  it("references description says name-based and not an LSP replacement", () => {
+    expect(REFERENCES_TOOL_DESCRIPTION).toMatch(/name-based/);
+    expect(REFERENCES_TOOL_DESCRIPTION).toMatch(/NOT a replacement for LSP/);
+    expect(REFERENCES_TOOL_DESCRIPTION).toMatch(/confidence/);
+  });
+
+  it("context description names the default budget of 4000", () => {
+    expect(CONTEXT_TOOL_DESCRIPTION).toMatch(/default is 4000/);
+  });
+
+  it("outline description is present", () => {
+    expect(OUTLINE_TOOL_DESCRIPTION).toMatch(/symbols/);
   });
 });
