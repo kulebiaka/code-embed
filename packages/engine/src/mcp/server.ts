@@ -4,17 +4,29 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   ErrorCodes,
+  CONTEXT_TOOL_DESCRIPTION,
   FIND_SIMILAR_TOOL_DESCRIPTION,
   MAX_TOOL_TOP,
+  OUTLINE_TOOL_DESCRIPTION,
+  REFERENCES_TOOL_DESCRIPTION,
   SEARCH_MODES,
   SEARCH_TOOL_DESCRIPTION,
   TOOL_NAMES,
   ToolInputError,
+  formatContextForAgent,
   formatForAgent,
+  formatOutlineForAgent,
+  formatReferencesForAgent,
+  toContextParams,
   toFindSimilarParams,
+  toOutlineParams,
+  toReferencesParams,
   toSearchParams,
+  type ContextToolInput,
   type EngineApi,
   type FindSimilarToolInput,
+  type OutlineToolInput,
+  type ReferencesToolInput,
   type SearchToolInput,
 } from "@code-embed/protocol";
 import { z } from "zod";
@@ -49,6 +61,22 @@ const findSimilarShape = {
   code: z.string().min(1).optional(),
   lang: z.string().optional(),
   top,
+};
+
+const outlineShape = {
+  path: z.string().min(1),
+};
+
+const referencesShape = {
+  symbol: z.string().min(1),
+  path: z.string().min(1).optional(),
+};
+
+const contextShape = {
+  path: z.string().optional(),
+  line: z.number().optional(),
+  query: z.string().optional(),
+  budget_tokens: z.number().optional(),
 };
 
 function isNoIndex(err: unknown): boolean {
@@ -101,6 +129,45 @@ export function createMcpServer(root: string): { server: McpServer; close(): Pro
       try {
         const params = toFindSimilarParams(args as FindSimilarToolInput);
         return textResult(formatForAgent(await (await engine()).findSimilar(params)));
+      } catch (err) {
+        return failure(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    TOOL_NAMES.outline,
+    { description: OUTLINE_TOOL_DESCRIPTION, inputSchema: outlineShape },
+    async (args) => {
+      try {
+        const params = toOutlineParams(args as OutlineToolInput);
+        return textResult(formatOutlineForAgent(await (await engine()).outline(params)));
+      } catch (err) {
+        return failure(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    TOOL_NAMES.references,
+    { description: REFERENCES_TOOL_DESCRIPTION, inputSchema: referencesShape },
+    async (args) => {
+      try {
+        const params = toReferencesParams(args as ReferencesToolInput);
+        return textResult(formatReferencesForAgent(await (await engine()).references(params)));
+      } catch (err) {
+        return failure(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    TOOL_NAMES.context,
+    { description: CONTEXT_TOOL_DESCRIPTION, inputSchema: contextShape },
+    async (args) => {
+      try {
+        const params = toContextParams(args as ContextToolInput);
+        return textResult(formatContextForAgent(await (await engine()).context(params)));
       } catch (err) {
         return failure(err);
       }
