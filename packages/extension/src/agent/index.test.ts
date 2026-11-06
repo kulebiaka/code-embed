@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
-import { EngineRpcError } from "@code-embed/protocol";
+import { EngineRpcError, formatContextForAgent, formatOutlineForAgent, formatReferencesForAgent } from "@code-embed/protocol";
 import type { EngineClient } from "../engine/types";
 
 vi.mock("../engine/paths", () => ({
@@ -39,14 +39,40 @@ const resp = {
   ],
 };
 
+const range = { startLine: 1, endLine: 2, startByte: 0, endByte: 0 };
+const outlineResp = {
+  path: "a.ts",
+  lang: "typescript",
+  symbols: [{ symbol: "f", parentSymbol: null, kind: "function", signature: "function f()", range }],
+  tookMs: 1,
+};
+const refsResp = {
+  symbol: "f",
+  items: [{ role: "definition", path: "a.ts", lang: "typescript", range, line: 1, symbol: "f", kind: "function", confidence: "high", text: "function f()" }],
+  truncated: false,
+  tookMs: 1,
+};
+const contextResp = {
+  chunks: [{ level: "target", path: "a.ts", lang: "typescript", range, symbol: "f", kind: "function", text: "code", tokens: 1 }],
+  commits: [],
+  budgetTokens: 4000,
+  usedTokens: 1,
+  omitted: [],
+  partial: false,
+  tookMs: 1,
+};
+
 describe("registerAgentTools", () => {
   const tools = new Map<string, Tool>();
-  const client = { search: vi.fn(), findSimilar: vi.fn() };
+  const client = { search: vi.fn(), findSimilar: vi.fn(), outline: vi.fn(), references: vi.fn(), context: vi.fn() };
 
   beforeEach(() => {
     tools.clear();
     client.search.mockReset().mockResolvedValue(resp);
     client.findSimilar.mockReset().mockResolvedValue(resp);
+    client.outline.mockReset().mockResolvedValue(outlineResp);
+    client.references.mockReset().mockResolvedValue(refsResp);
+    client.context.mockReset().mockResolvedValue(contextResp);
     vi.spyOn(vscode.lm, "registerTool").mockImplementation(((name: string, t: Tool) => {
       tools.set(name, t);
       return { dispose() {} };
@@ -54,8 +80,29 @@ describe("registerAgentTools", () => {
     registerAgentTools(ctx(), client as unknown as EngineClient);
   });
 
-  it("registers both tools", () => {
-    expect([...tools.keys()]).toEqual(["code-embed_search", "code-embed_find_similar"]);
+  it("registers all tools", () => {
+    expect([...tools.keys()]).toEqual([
+      "code-embed_search",
+      "code-embed_find_similar",
+      "code-embed_outline",
+      "code-embed_references",
+      "code-embed_context",
+    ]);
+  });
+
+  it("outline, references and context call the client and format the response", async () => {
+    const src = new vscode.CancellationTokenSource();
+    const o = await tools.get("code-embed_outline")!.invoke({ input: { path: "a.ts" } }, src.token);
+    expect(client.outline).toHaveBeenCalledWith({ path: "a.ts" }, expect.any(AbortSignal));
+    expect(o.content[0]!.value).toBe(formatOutlineForAgent(outlineResp as never));
+    const r = await tools.get("code-embed_references")!.invoke({ input: { symbol: "f", path: "a.ts" } }, src.token);
+    expect(client.references).toHaveBeenCalledWith({ symbol: "f", path: "a.ts" }, expect.any(AbortSignal));
+    expect(r.content[0]!.value).toBe(formatReferencesForAgent(refsResp as never));
+    const c = await tools.get("code-embed_context")!.invoke({ input: { path: "a.ts", line: 2, budget_tokens: 500 } }, src.token);
+    expect(client.context).toHaveBeenCalledWith({ path: "a.ts", line: 2, budgetTokens: 500 }, expect.any(AbortSignal));
+    expect(c.content[0]!.value).toBe(formatContextForAgent(contextResp as never));
+    const bad = await tools.get("code-embed_outline")!.invoke({ input: { path: "" } }, src.token);
+    expect(bad.content[0]!.value).toMatch(/^Invalid input: /);
   });
 
   it("search maps input, forwards abort, formats", async () => {
