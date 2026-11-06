@@ -84,6 +84,13 @@ export function renderMarkdown(result: RunResult): string {
   for (const r of result.reports) {
     for (const [repo, m] of Object.entries(r.perRepo)) lines.push(`| ${r.mode} | ${repo} | ${metricCells(m)} |`);
   }
+  const ctx = result.reports.find((r) => r.contextRecall)?.contextRecall;
+  if (ctx) {
+    lines.push("", "## Context recall", "");
+    lines.push("| Queries | Recall |", "|---|---|");
+    lines.push(`| ${ctx.count} | ${f(ctx.recall)} |`);
+    lines.push("", "Share of expected path+symbol pairs found in the context package, computed from path:line, once per run.");
+  }
   const timed = result.reports.find((r) => r.indexSeconds !== undefined);
   if (timed) {
     lines.push("", "## Indexing and search", "");
