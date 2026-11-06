@@ -47,6 +47,19 @@ describe("renderMarkdown", () => {
   });
 });
 
+describe("context recall in the report", () => {
+  it("renders the section when recall is known", () => {
+    const reports = [{ ...rep("hybrid", 0.8), contextRecall: { count: 20, recall: 0.625 } }];
+    const md = renderMarkdown({ model: "fake", createdAt: "now", reports, nr10: null });
+    expect(md).toContain("## Context recall");
+    expect(md).toContain("| 20 | 0.625 |");
+  });
+
+  it("omits the section without context records", () => {
+    expect(renderMarkdown({ model: "fake", createdAt: "now", reports: [rep("hybrid", 0.8)], nr10: null })).not.toContain("Context recall");
+  });
+});
+
 describe("index.db size (NR-02)", () => {
   const reports = [rep("hybrid", 0.8)];
   const indexDb = { totalBytes: 3 * 1024 * 1024, perRepo: { cobra: 1024 * 1024, requests: 2 * 1024 * 1024 } };

@@ -79,6 +79,21 @@ function validateQuery(q: unknown, where: string, repo: string, errors: string[]
       if (path.isAbsolute(e.path) || e.path.split("/").includes("..")) fail(`expected[${j}] path must be relative to the repo root`);
     });
   }
+  if (q.context !== undefined) {
+    const c = q.context;
+    if (!isRecord(c) || !nonEmpty(c.path) || !isLine(c.line)) fail("context must be {path, line>=1, expected}");
+    else {
+      if (path.isAbsolute(c.path) || c.path.split("/").includes("..")) fail("context path must be relative to the repo root");
+      if (!Array.isArray(c.expected) || c.expected.length === 0) fail("context.expected must be a non-empty array");
+      else {
+        c.expected.forEach((e: unknown, j: number) => {
+          if (!isRecord(e) || !nonEmpty(e.path) || !nonEmpty(e.symbol)) return fail(`context.expected[${j}] must be {path, symbol}`);
+          if (Object.keys(e).length !== 2) fail(`context.expected[${j}] must have only path and symbol`);
+          if (path.isAbsolute(e.path) || e.path.split("/").includes("..")) fail(`context.expected[${j}] path must be relative to the repo root`);
+        });
+      }
+    }
+  }
   return ok ? (q as unknown as EvalQuery) : undefined;
 }
 
@@ -127,7 +142,8 @@ export function validateDataset(input: ValidateInput): ValidateResult {
       if (queries.has(q.query)) errors.push(`${where}: duplicate query text`);
       queries.add(q.query);
       if (!cloned) return;
-      for (const e of q.expected) {
+      const files = [...q.expected.map((e) => ({ path: e.path, last: e.endLine })), ...(q.context ? [{ path: q.context.path, last: q.context.line }, ...q.context.expected.map((e) => ({ path: e.path, last: 1 }))] : [])];
+      for (const e of files) {
         let total = lineCounts.get(e.path);
         if (total === undefined) {
           const file = path.join(cloneDir, e.path);
@@ -135,7 +151,7 @@ export function validateDataset(input: ValidateInput): ValidateResult {
           lineCounts.set(e.path, total);
         }
         if (total === null) errors.push(`${where}: ${e.path} does not exist in ${repo.name}`);
-        else if (e.endLine > total) errors.push(`${where}: ${e.path} has ${total} lines, expected range ends at ${e.endLine}`);
+        else if (e.last > total) errors.push(`${where}: ${e.path} has ${total} lines, expected range ends at ${e.last}`);
       }
     });
 
