@@ -1,7 +1,20 @@
 import { SEARCH_MODES } from "./rpc";
-import type { FindSimilarParams, SearchParams, SearchResponse, SearchResult } from "./rpc";
+import type {
+  ContextChunk,
+  ContextParams,
+  ContextResponse,
+  FindSimilarParams,
+  OutlineParams,
+  OutlineResponse,
+  ReferenceItem,
+  ReferencesParams,
+  ReferencesResponse,
+  SearchParams,
+  SearchResponse,
+  SearchResult,
+} from "./rpc";
 import { MAX_TOOL_TOP } from "./tools";
-import type { FindSimilarToolInput, SearchToolInput } from "./tools";
+import type { ContextToolInput, FindSimilarToolInput, OutlineToolInput, ReferencesToolInput, SearchToolInput } from "./tools";
 
 export class ToolInputError extends Error {
   constructor(message: string) {
@@ -84,6 +97,35 @@ export function toFindSimilarParams(input: FindSimilarToolInput): FindSimilarPar
   return assign({ path, range: { startLine, endLine } } as FindSimilarParams, { top });
 }
 
+export function toOutlineParams(input: OutlineToolInput): OutlineParams {
+  const i = (input ?? {}) as unknown as Record<string, unknown>;
+  return { path: reqString(i.path, "path") };
+}
+
+export function toReferencesParams(input: ReferencesToolInput): ReferencesParams {
+  const i = (input ?? {}) as unknown as Record<string, unknown>;
+  return assign({ symbol: reqString(i.symbol, "symbol") } as ReferencesParams, { path: optString(i.path, "path") });
+}
+
+export function toContextParams(input: ContextToolInput): ContextParams {
+  const i = (input ?? {}) as unknown as Record<string, unknown>;
+  const has = (k: string) => i[k] !== undefined && i[k] !== null;
+  let budgetTokens: number | undefined;
+  if (has("budget_tokens")) {
+    const b = i.budget_tokens;
+    if (typeof b !== "number" || !Number.isInteger(b) || b < 1) throw new ToolInputError('"budget_tokens" must be an integer >= 1');
+    budgetTokens = b;
+  }
+  if (has("query")) {
+    if (has("path") || has("line")) throw new ToolInputError('pass either "query" or "path" with "line", not both');
+    return assign({ query: reqString(i.query, "query") } as ContextParams, { budgetTokens });
+  }
+  if (!has("path") && !has("line")) throw new ToolInputError('pass either "query" or "path" with "line"');
+  const path = reqString(i.path, "path");
+  if (!has("line")) throw new ToolInputError('"line" is required together with "path"');
+  return assign({ path, line: line(i.line, "line") } as ContextParams, { budgetTokens });
+}
+
 export interface AgentFormatOptions {
   maxTokens?: number;
   maxSnippetLines?: number;
@@ -124,5 +166,89 @@ export function formatForAgent(resp: SearchResponse, opts?: AgentFormatOptions):
   }
   const rest = resp.results.length - shown;
   if (rest > 0) out.push(`… ${rest} more results`);
+  return out.join("\n");
+}
+
+export function formatOutlineForAgent(resp: OutlineResponse): string {
+  if (resp.symbols.length === 0) return `${resp.path}\nNo symbols found (the file may not be indexed).`;
+  const rows = resp.symbols.map((s) => {
+    const name = s.parentSymbol && s.symbol ? `${s.parentSymbol}.${s.symbol}` : (s.symbol ?? "-");
+    const sig = s.signature ? `  ${s.signature.split(/\r?\n/)[0]}` : "";
+    return `  ${s.range.startLine}-${s.range.endLine}  ${s.kind}  ${name}${sig}`;
+  });
+  return [resp.path, ...rows].join("\n");
+}
+
+function formatReferenceItem(r: ReferenceItem): string {
+  const text = r.text.replace(/\r?\n$/, "").split(/\r?\n/)[0]!.trim();
+  const where = r.symbol ? `  in ${r.symbol}` : "";
+  return `  ${r.path}:${r.line}  [${r.kind}, ${r.confidence}]${where}\n      ${text}`;
+}
+
+export function formatReferencesForAgent(resp: ReferencesResponse, opts?: AgentFormatOptions): string {
+  const { maxTokens } = { ...DEFAULT_AGENT_FORMAT_OPTIONS, ...opts };
+  const maxChars = maxTokens * 4;
+  const defs = resp.items.filter((r) => r.role === "definition");
+  const usages = resp.items.filter((r) => r.role === "usage");
+  if (resp.items.length === 0) return `No definitions or usages found for ${resp.symbol}.`;
+  const out: string[] = [];
+  let used = 0;
+  const push = (s: string) => {
+    out.push(s);
+    used += s.length + 1;
+  };
+  push(`Definitions of ${resp.symbol} (${defs.length}):`);
+  if (defs.length === 0) push("  none found");
+  for (const d of defs) push(formatReferenceItem(d));
+  push(`Usages (${usages.length}${resp.truncated ? "+" : ""}):`);
+  if (usages.length === 0) push("  none found");
+  let shown = 0;
+  for (const u of usages) {
+    const block = formatReferenceItem(u);
+    if (shown > 0 && used + block.length + 1 > maxChars) break;
+    push(block);
+    shown++;
+  }
+  const rest = usages.length - shown;
+  if (rest > 0) out.push(`… ${rest} more usages`);
+  if (resp.truncated) out.push("Usage list truncated at the store limit; narrow the search with path.");
+  return out.join("\n");
+}
+
+const CONTEXT_LEVEL_TITLES: Record<ContextChunk["level"], string> = {
+  target: "Target",
+  callee: "Callees",
+  caller: "Callers",
+  test: "Tests",
+  similar: "Similar",
+  lexical: "Lexical",
+};
+
+function formatContextChunk(c: ContextChunk): string {
+  const conf = c.confidence ? `  (${c.confidence})` : "";
+  const head = `${c.path}:${c.range.startLine}-${c.range.endLine}  ${c.symbol ?? "-"}${conf}`;
+  const body = c.text
+    .replace(/\r?\n$/, "")
+    .split(/\r?\n/)
+    .map((l) => `    ${l}`);
+  return [head, ...body].join("\n");
+}
+
+export function formatContextForAgent(resp: ContextResponse): string {
+  const out: string[] = [];
+  if (resp.partial) out.push(`Warning: context is partial${resp.partialReason ? ` (${resp.partialReason})` : ""}.`);
+  if (resp.chunks.length === 0) out.push("Nothing found.");
+  for (const level of Object.keys(CONTEXT_LEVEL_TITLES) as ContextChunk["level"][]) {
+    const chunks = resp.chunks.filter((c) => c.level === level);
+    if (chunks.length === 0) continue;
+    out.push(`## ${CONTEXT_LEVEL_TITLES[level]}`);
+    for (const c of chunks) out.push(formatContextChunk(c));
+  }
+  if (resp.commits.length > 0) {
+    out.push("## Recent commits");
+    for (const c of resp.commits) out.push(`  ${c}`);
+  }
+  if (resp.omitted.length > 0) out.push(`Omitted (budget): ${resp.omitted.join(", ")}`);
+  out.push(`Tokens: ${resp.usedTokens}/${resp.budgetTokens}`);
   return out.join("\n");
 }
