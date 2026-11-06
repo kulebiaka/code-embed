@@ -274,9 +274,10 @@ class SqliteStore implements IndexStore {
 
   pendingChunks(limit: number, paths?: string[]): ChunkRecord[] {
     if (paths && paths.length === 0) return [];
+    const order = this.hasRefs ? "(SELECT COUNT(*) FROM refs r WHERE r.name = c.symbol) DESC, c.id" : "c.id";
     const pathSql = paths ? ` AND f.path IN (${placeholders(paths.length)})` : "";
     return this.db
-      .prepare(`${this.chunkSql} WHERE c.embedded = 0${pathSql} ORDER BY c.id LIMIT ?`)
+      .prepare(`${this.chunkSql} WHERE c.embedded = 0${pathSql} ORDER BY ${order} LIMIT ?`)
       .all(...(paths ?? []), limit)
       .map(chunkRecord);
   }
