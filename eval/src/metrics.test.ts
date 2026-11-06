@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregate, isHit, metricsOf, percentile, scoreQuery } from "./metrics";
+import { aggregate, contextMetricsOf, isContextHit, isHit, metricsOf, percentile, scoreContext, scoreQuery } from "./metrics";
 import type { EvalQuery } from "./types";
 
 const q = (id: string, repo: string, lang: "ru" | "en", expected: EvalQuery["expected"]): EvalQuery => ({
@@ -76,5 +76,38 @@ describe("percentile", () => {
     expect(percentile(v, 50)).toBe(5);
     expect(percentile(v, 95)).toBe(10);
     expect(percentile([], 50)).toBe(0);
+  });
+});
+
+describe("context recall", () => {
+  const withContext = (expected: { path: string; symbol: string }[]): EvalQuery => ({
+    ...q("c", "x", "en", [{ path: "z.go", startLine: 1, endLine: 2 }]),
+    context: { path: "a.go", line: 5, expected },
+  });
+
+  it("matches a chunk by path and symbol only", () => {
+    const e = { path: "a.go", symbol: "Run" };
+    expect(isContextHit(e, { path: "./a.go", symbol: "Run" })).toBe(true);
+    expect(isContextHit(e, { path: "a.go", symbol: "Stop" })).toBe(false);
+    expect(isContextHit(e, { path: "b.go", symbol: "Run" })).toBe(false);
+    expect(isContextHit(e, { path: "a.go", symbol: null })).toBe(false);
+  });
+
+  it("is the share of expected pairs found in the package", () => {
+    const query = withContext([
+      { path: "a.go", symbol: "Run" },
+      { path: "b.go", symbol: "Stop" },
+    ]);
+    expect(scoreContext(query, [{ path: "a.go", symbol: "Run" }, { path: "c.go", symbol: "Stop" }])).toBe(0.5);
+    expect(scoreContext(query, [{ path: "a.go", symbol: "Run" }, { path: "b.go", symbol: "Stop" }])).toBe(1);
+  });
+
+  it("is undefined for records without the field", () => {
+    expect(scoreContext(q("1", "x", "en", []), [])).toBeUndefined();
+  });
+
+  it("averages per-record recalls", () => {
+    expect(contextMetricsOf([1, 0.5])).toEqual({ count: 2, recall: 0.75 });
+    expect(contextMetricsOf([])).toBeUndefined();
   });
 });

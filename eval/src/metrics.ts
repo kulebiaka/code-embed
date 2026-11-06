@@ -1,4 +1,4 @@
-import type { EvalMetrics, EvalQuery, ExpectedChunk } from "./types";
+import type { ContextMetrics, EvalMetrics, EvalQuery, ExpectedChunk, ExpectedContextChunk } from "./types";
 
 export interface Hit {
   path: string;
@@ -40,6 +40,26 @@ export function scoreQuery(query: EvalQuery, results: Hit[]): QueryScore {
     recall: query.expected.length === 0 ? 0 : found / query.expected.length,
     rr: first < 0 ? 0 : 1 / (first + 1),
   };
+}
+
+export interface ContextHit {
+  path: string;
+  symbol: string | null;
+}
+
+export function isContextHit(expected: ExpectedContextChunk, chunk: ContextHit): boolean {
+  return norm(expected.path) === norm(chunk.path) && expected.symbol === chunk.symbol;
+}
+
+export function scoreContext(query: EvalQuery, chunks: ContextHit[]): number | undefined {
+  const expected = query.context?.expected;
+  if (!expected || expected.length === 0) return undefined;
+  return expected.filter((e) => chunks.some((c) => isContextHit(e, c))).length / expected.length;
+}
+
+export function contextMetricsOf(recalls: number[]): ContextMetrics | undefined {
+  if (recalls.length === 0) return undefined;
+  return { count: recalls.length, recall: recalls.reduce((a, b) => a + b, 0) / recalls.length };
 }
 
 export function metricsOf(scores: QueryScore[]): EvalMetrics {

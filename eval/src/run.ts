@@ -7,7 +7,7 @@ import { createLocalEngine } from "../../packages/engine/src/engine/service";
 import { DEFAULT_MODEL_ID } from "../../packages/engine/src/embed/catalog";
 import { INDEX_DB } from "../../packages/engine/src/core/index-dir";
 import { modelsDir } from "../../packages/engine/src/core/paths";
-import { type QueryScore, TOP_K, aggregate, percentile, scoreQuery } from "./metrics";
+import { type QueryScore, TOP_K, aggregate, contextMetricsOf, percentile, scoreContext, scoreQuery } from "./metrics";
 import { type RunReport, type RunResult, checkNr10, renderMarkdown, writeOutputs } from "./report";
 import type { EvalMode, EvalQuery, EvalRepo } from "./types";
 
@@ -51,6 +51,7 @@ export async function runEval(opts: RunOptions): Promise<RunResult> {
 
   const scores = new Map<EvalMode, QueryScore[]>(opts.modes.map((m) => [m, []]));
   const latencies = new Map<EvalMode, number[]>(opts.modes.map((m) => [m, []]));
+  const contextRecalls: number[] = [];
   let indexSeconds = 0;
   let chunks = 0;
   const indexDbBytes: Record<string, number> = {};
@@ -76,6 +77,14 @@ export async function runEval(opts: RunOptions): Promise<RunResult> {
         const status = await engine.status();
         chunks += status.chunks;
         indexDir = status.indexDir;
+
+        for (const query of queries) {
+          if (!query.context) continue;
+          const { path: ctxPath, line } = query.context;
+          const res = await engine.context({ path: ctxPath, line });
+          const recall = scoreContext(query, res.chunks);
+          if (recall !== undefined) contextRecalls.push(recall);
+        }
 
         for (const mode of opts.modes) {
           for (const query of queries) {
@@ -106,11 +115,13 @@ export async function runEval(opts: RunOptions): Promise<RunResult> {
 
   const createdAt = new Date().toISOString();
   const rssMb = process.resourceUsage().maxRSS / 1024;
+  const contextRecall = contextMetricsOf(contextRecalls);
   const reports: RunReport[] = opts.modes.map((mode) => ({
     model: opts.model,
     mode,
     createdAt,
     ...aggregate(scores.get(mode) ?? []),
+    contextRecall,
     indexSeconds,
     chunksPerSec: indexSeconds > 0 ? chunks / indexSeconds : 0,
     rssMb,
