@@ -48,15 +48,62 @@ The first form finds code similar to a line range (1-based, inclusive); the seco
 
 ## outline
 
-`code-embed outline <PATH> [--json]` prints the symbols of a file (kind, signature, line range).
+```
+code-embed outline <PATH> [--json]
+```
+
+Prints the symbols of a file (line range, kind, name, signature), ordered by position. `PATH` is relative to the project root. `--json` prints the `symbols.outline` response as JSON. A file that is not indexed yields an empty list.
+
+```console
+$ code-embed outline src/payment/refund.ts
+src/payment/refund.ts
+  12-23  interface  RefundRequest  export interface RefundRequest {
+  64-90  method  RefundService.processPaymentRefund  async processPaymentRefund(request: RefundRequest): Promise<RefundResult> {
+```
 
 ## refs
 
-`code-embed refs <SYMBOL> [--path PATH] [--json]` lists definitions and usages of a symbol by name; `--path` restricts definitions to one file.
+```
+code-embed refs <SYMBOL> [--path PATH] [--json]
+```
+
+Lists definitions and usages (calls, type references, imports) of a symbol by name. The search is name-based, not a replacement for a language server: each item carries a confidence, `high` or `low`. `--path PATH` restricts definitions to one file (relative to the project root) and is passed as the `path` parameter of the `references` tool. `--json` prints the `symbols.references` response as JSON.
+
+```console
+$ code-embed refs processPaymentRefund --path src/payment/refund.ts
+Definitions of processPaymentRefund (1):
+  src/payment/refund.ts:64  [method, high]  in RefundService
+      async processPaymentRefund(request: RefundRequest): Promise<RefundResult> {
+Usages (1):
+  src/api/refunds.ts:31  [call, high]  in handleRefund
+      return service.processPaymentRefund(req.body);
+```
 
 ## context
 
-`code-embed context <PATH>:<LINE> | "<query>" [--budget N] [--json]` assembles the code around a location or a query within a token budget; `--budget` sets the budget in tokens (integer >= 1, default 4000).
+```
+code-embed context <PATH>:<LINE> | "<query>" [--budget N] [--json]
+```
+
+Assembles the working context of a piece of code in one call. The target is a location (`PATH:LINE`, 1-based) or a query (natural language or a symbol name). `--budget N` sets the token budget (integer >= 1, default 4000) and is passed as `budget_tokens` of the `context` tool; tokens are counted with the chunker's token counter. `--json` prints the `context` response as JSON.
+
+The package is filled in priority order until the budget runs out: the target chunk; definitions of the symbols it calls (signature and first 5 lines, only calls with `high` confidence); callers; tests; similar code; lexical matches. Recent commits of the target file (the last 5, as short hash, date, subject) are added separately. Levels that did not fit are listed as omitted; the target is always included, even if it alone exceeds the budget.
+
+```console
+$ code-embed context src/payment/refund.ts:70 --budget 2000
+## Target
+src/payment/refund.ts:64-90  RefundService.processPaymentRefund
+    async processPaymentRefund(request: RefundRequest): Promise<RefundResult> {
+      ...
+## Callees
+src/payment/ledger.ts:10-24  recordRefund  (high)
+    export function recordRefund(entry: LedgerEntry): void {
+      ...
+## Recent commits
+  a1b2c3d 2026-10-28 fix(payment): honour the refund window
+Omitted (budget): similar, lexical
+Tokens: 1874/2000
+```
 
 ## index
 
@@ -80,7 +127,7 @@ Builds or updates the index (lexical phase, then vector phase). `--watch` keeps 
 
 ## mcp
 
-`code-embed mcp [--root DIR]` starts a stdio MCP server with the `search` and `find_similar` tools. See [agents.md](agents.md).
+`code-embed mcp [--root DIR]` starts a stdio MCP server with the `search`, `find_similar`, `outline`, `references` and `context` tools. See [agents.md](agents.md).
 
 ## model
 

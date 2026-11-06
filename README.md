@@ -50,7 +50,8 @@ grep finds what you can spell. code-embed finds what you mean: *"retry with expo
 - **Instant start.** Indexing runs in two phases: lexical (search works right away), then vector in the background.
 - **One model per machine.** Ten VS Code windows, a daemon, the CLI and an MCP server share one inference process with one copy of the model and one thread limit, so the laptop stays usable ([details](#one-inference-process-per-machine)).
 - **Bring your own embeddings.** Built-in local ONNX models, or any OpenAI-compatible API (Ollama, LM Studio, hosted providers).
-- **Built for agents.** VS Code LM Tools `#semsearch` and `#similar`, and an MCP server for Cursor, Windsurf and Claude Code.
+- **Symbol graph and context.** `outline` lists a file's symbols, `references` finds definitions and usages of a symbol by name, `context` assembles a target chunk with its callees, callers, tests, similar code and recent commits within a token budget (default 4000).
+- **Built for agents.** VS Code LM Tools `#semsearch`, `#similar`, `#outline`, `#refs` and `#context`, and an MCP server for Cursor, Windsurf and Claude Code.
 - **Private by default.** No telemetry. Nothing is sent anywhere unless you configure an external provider and confirm it.
 
 ## Install
@@ -106,6 +107,9 @@ Full reference: [docs/cli.md](docs/cli.md). In short:
 | --- | --- |
 | `code-embed [OPTIONS] <QUERY>` | search |
 | `code-embed similar <PATH>:<START>-<END>` / `similar -` | find similar code |
+| `code-embed outline <PATH>` | symbols of a file |
+| `code-embed refs <SYMBOL> [--path PATH]` | definitions and usages of a symbol |
+| `code-embed context <PATH>:<LINE>` / `context "<query>" [--budget N]` | code around a location or query |
 | `code-embed index [--watch] [--full]` | build or update the index |
 | `code-embed status` / `stop` / `gc` / `clean` | status, stop the daemon, garbage-collect, delete the index |
 | `code-embed daemon [--detach]` | daemon: engine + socket + file watcher |
@@ -170,11 +174,11 @@ Select one with `embedding.provider = "remote"` in `.code-embed.toml`, `--provid
 
 ## Agent integration
 
-Details: [docs/agents.md](docs/agents.md). Every interface exposes the same two tools with a shared contract: `search` and `find_similar`.
+Details: [docs/agents.md](docs/agents.md). Every interface exposes the same five tools with a shared contract: `search`, `find_similar`, `outline`, `references` and `context`. `references` works by name and does not replace LSP.
 
 ### VS Code (LM Tools)
 
-Agent tools in VS Code: `#semsearch` (search) and `#similar` (similar code). Available while the extension is active.
+Agent tools in VS Code: `#semsearch` (search), `#similar` (similar code), `#outline` (file symbols), `#refs` (definitions and usages) and `#context` (code around a location or query). Available while the extension is active.
 
 ### MCP
 
@@ -205,6 +209,12 @@ claude mcp add code-embed -- npx -y code-embed mcp --root /path/to/project
   `include` and `--lang`.
 - Before a refactoring or a bug fix, look for similar places:
   `code-embed --json similar <path>:<start>-<end>` (or `find_similar`).
+- To see the structure of a file before reading it: `code-embed outline <path>` (or `outline`).
+- To find where a symbol is defined and used (by name, not LSP): `code-embed refs <symbol>`
+  (or `references`).
+- Before changing code, collect what it depends on and what depends on it:
+  `code-embed context <path>:<line>` (or `context`, optional `--budget` / `budget_tokens`,
+  default 4000).
 - For an exact identifier, string literal, error message, file name or a list of all usages
   of a symbol, use grep/ripgrep, not code-embed.
 - code-embed results are ranked chunks; read the referenced lines of the file before editing.
