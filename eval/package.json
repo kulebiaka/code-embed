@@ -7,7 +7,8 @@
   "scripts": {
     "typecheck": "tsc -p . --noEmit",
     "eval": "tsx src/run.ts",
-    "bench": "tsx src/bench.ts",
+    "agent": "tsx agent/run.ts",
+    "bench":"tsx src/bench.ts",
     "stage0": "tsx stage0/check-runtime.ts",
     "validate-dataset": "tsx scripts/validate-dataset.ts",
     "fetch-repos": "tsx scripts/fetch-repos.ts"
