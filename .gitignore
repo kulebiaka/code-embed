@@ -7,6 +7,8 @@ dist/
 .code-embed/
 eval/.repos/
 eval/reports/
+eval/stage0/reports/
+.vscode-test/
 coverage/
 packages/engine/README.md
 packages/engine/LICENSE

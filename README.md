@@ -56,6 +56,8 @@ grep finds what you can spell. code-embed finds what you mean: *"retry with expo
 
 ## Install
 
+Supported platforms: Windows x64, macOS on Apple silicon, Linux x64 and arm64 (glibc). Intel Macs and Windows on Arm are not supported: `onnxruntime-node` and `sqlite-vec` ship no native binaries for them.
+
 ### VS Code / Cursor / Windsurf
 
 Install **Code Embed** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=code-embed.code-embed-vscode) or [Open VSX](https://open-vsx.org/extension/code-embed/code-embed-vscode) (Cursor, Windsurf and other forks use Open VSX). VSIX packages are built per platform and include the engine. The default model (`qwen3-embedding-0.6b`, about 600 MB) is downloaded separately; `Code Embed: Install CLI` installs the CLI.

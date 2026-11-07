@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { build } from "esbuild";
-import { exitCode, lastJsonLine, minVersionFromRange, type RuntimeReport } from "./report";
+import { exitCode, extensionHostExe, minVersionFromRange, type RuntimeReport } from "./report";
 
 const run = promisify(execFile);
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -26,10 +26,11 @@ const bundle = join(reportDir, "stage0-bundle.mjs");
 await build({
   stdin: {
     contents: [
+      'import { writeFileSync } from "node:fs";',
       'import { runChecks } from "./checks";',
       "const report = await runChecks();",
-      "console.log(JSON.stringify(report));",
-      "process.exit(report.ok ? 0 : 1);",
+      "writeFileSync(process.env.STAGE0_ELECTRON_OUT, JSON.stringify(report));",
+      "process.exitCode = report.ok ? 0 : 1;",
     ].join("\n"),
     resolveDir: here,
     sourcefile: "electron-entry.ts",
@@ -46,15 +47,19 @@ await build({
 
 const reports: RuntimeReport[] = [];
 for (const version of [minVersion, "stable"]) {
-  const exe = await downloadAndUnzipVSCode(version);
-  const res = await run(exe, [bundle], {
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", STAGE0_ENGINE_PKG: enginePkg },
+  const exe = extensionHostExe(await downloadAndUnzipVSCode(version));
+  const out = join(reportDir, `electron-${version}.out.json`);
+  rmSync(out, { force: true });
+  // Code.exe on Windows can drop piped stdout on exit, so the report goes through a file.
+  await run(exe, [bundle], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", STAGE0_ENGINE_PKG: enginePkg, STAGE0_ELECTRON_OUT: out },
     timeout: 120_000,
-  }).catch((e: { stdout?: string; stderr?: string; message: string }) => {
-    if (e.stdout) return { stdout: e.stdout };
-    throw new Error(`VS Code ${version} failed to run: ${e.message}\n${e.stderr ?? ""}`);
+  }).catch((e: { code?: number | string; signal?: string; stderr?: string; message: string }) => {
+    if (existsSync(out)) return;
+    throw new Error(`VS Code ${version} failed to run (code ${e.code}, signal ${e.signal}): ${e.message}\n${e.stderr ?? ""}`);
   });
-  const report = lastJsonLine(res.stdout) as RuntimeReport;
+  const report = JSON.parse(readFileSync(out, "utf8")) as RuntimeReport;
+  rmSync(out);
   const sqlite = report.checks.find((c) => c.name === "vec0:int8-knn");
   console.log(
     `VS Code ${version}: electron=${report.electron} node=${report.node} ok=${report.ok} node:sqlite+vec=${sqlite?.status}`,

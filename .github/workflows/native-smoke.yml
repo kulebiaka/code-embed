@@ -17,6 +17,9 @@ on:
     paths:
       - "**/package.json"
       - "pnpm-lock.yaml"
+      - "eval/stage0/**"
+      - ".github/workflows/native-smoke.yml"
+      - ".github/workflows/release.yml"
 
 jobs:
   smoke:
@@ -26,9 +29,7 @@ jobs:
       matrix:
         include:
           - { target: win32-x64, os: windows-2022 }
-          - { target: win32-arm64, os: windows-11-arm }
-          - { target: darwin-x64, os: macos-15-intel }
-          - { target: darwin-arm64, os: macos-14 }
+          - { target: darwin-arm64, os: macos-15 }
           - { target: linux-x64, os: ubuntu-22.04 }
           - { target: linux-arm64, os: ubuntu-22.04-arm }
     runs-on: ${{ matrix.os }}
@@ -66,7 +67,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: darwin-arm64, os: macos-14 }
+          - { target: darwin-arm64, os: macos-15 }
           - { target: linux-x64, os: ubuntu-22.04 }
           - { target: win32-x64, os: windows-2022 }
     runs-on: ${{ matrix.os }}

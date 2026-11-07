@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Index schema version 3: existing indexes are rebuilt on first open; vectors are reused from the embeddings cache, so nothing is embedded again.
 - Background embedding goes through chunks with more incoming references first, after open and recently changed files.
 - The `search` and `find_similar` tool descriptions now point agents to `references` for callers and to `context` for the surrounding code.
+- VSIX packages are built for `win32-x64`, `darwin-arm64`, `linux-x64` and `linux-arm64`. `darwin-x64` and `win32-arm64` are dropped: `onnxruntime-node` and `sqlite-vec` ship no native binaries for them.
 
 ## [0.1.0] - 2026-10-22
 
