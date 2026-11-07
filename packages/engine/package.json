@@ -46,7 +46,7 @@
     "@code-embed/protocol": "workspace:*",
     "@huggingface/transformers": "^4.3.1",
     "@modelcontextprotocol/sdk": "^1.32.1",
-    "@napi-rs/keyring": "^2.1.0",
+    "@napi-rs/keyring": "^2.1.2",
     "@parcel/watcher": "^2.6.0",
     "env-paths": "^4.0.0",
     "hash-wasm": "^4.12.0",
