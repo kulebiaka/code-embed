@@ -145,7 +145,8 @@ describe("createHostEmbedder", () => {
     const other = loadManifest().models.find((m) => m.id !== DEFAULTS.model && m.pooling !== "static")!;
     const a = make({}, { threadsExplicit: true }, getModel(DEFAULTS.model), 2);
     const b = make({}, {}, getModel(other.id), 4);
-    await Promise.all([a.embedQueries(["x"]), b.embedQueries(["y"])]);
+    await a.embedQueries(["x"]);
+    await b.embedQueries(["y"]);
     expect(a.shared).toBe(true);
     expect(b.shared).toBe(true);
     expect(hostPids()).toHaveLength(1);
