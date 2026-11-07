@@ -3,7 +3,7 @@
   "displayName": "Code Embed",
   "description": "Local hybrid (semantic + lexical) code search for VS Code and AI agents",
   "publisher": "code-embed",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "icon": "media/logo.png",
   "galleryBanner": {
     "color": "#312e81",

@@ -50,7 +50,7 @@ The `Code Embed: Copy MCP Config` command copies JSON for Cursor and Windsurf `m
 ```json
 {
   "mcpServers": {
-    "code-embed": { "command": "npx", "args": ["-y", "code-embed@0.1.0", "mcp", "--root", "/path/to/project"] }
+    "code-embed": { "command": "npx", "args": ["-y", "code-embed@0.2.0", "mcp", "--root", "/path/to/project"] }
   }
 }
 ```

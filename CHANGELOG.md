@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-07
+
+### Added
+
+- Symbol graph for TypeScript, TSX, JavaScript and Python: call, type and import references extracted with tree-sitter during indexing and resolved by name with `high`/`low` confidence (not a replacement for an LSP).
+- `outline`, `references` and `context` tools in the MCP server and as VS Code LM Tools `#outline`, `#refs` and `#context`.
+- CLI commands `code-embed outline <PATH>`, `code-embed refs <SYMBOL> [--path PATH]` and `code-embed context <PATH>:<LINE> | "<query>" [--budget N]`, all with `--json`.
+- `context` assembles the neighbourhood of a place in one answer within a token budget (4000 by default): the target chunk, definitions of the symbols it calls, up to 5 callers, tests that reference it, up to 3 similar chunks once vectors are ready and the last 5 commits of the file. Languages without the graph get the target, similar chunks and a lexical search by symbol name.
+
+### Changed
+
+- Index schema version 3: existing indexes are rebuilt on first open; vectors are reused from the embeddings cache, so nothing is embedded again.
+- Background embedding goes through chunks with more incoming references first, after open and recently changed files.
+- The `search` and `find_similar` tool descriptions now point agents to `references` for callers and to `context` for the surrounding code.
+
 ## [0.1.0] - 2026-10-22
 
 First public release.
@@ -25,5 +40,6 @@ First public release.
 - Safe concurrent access to the embeddings database from several processes.
 - Search and "Find Similar" answer within 800 ms during indexing, or return a result marked `partial`.
 
-[Unreleased]: https://github.com/kulebiaka/code-embed/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/kulebiaka/code-embed/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kulebiaka/code-embed/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kulebiaka/code-embed/releases/tag/v0.1.0
