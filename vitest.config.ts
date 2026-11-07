@@ -38,7 +38,7 @@ export default defineConfig({
         test: {
           name: "eval",
           root: r("./eval"),
-          include: ["src/**/*.test.ts", "scripts/**/*.test.ts", "stage0/**/*.test.ts"],
+          include: ["src/**/*.test.ts", "scripts/**/*.test.ts", "stage0/**/*.test.ts", "agent/**/*.test.ts"],
           passWithNoTests: true,
         },
       },

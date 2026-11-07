@@ -112,6 +112,14 @@ describe("vectors", () => {
     expect(store.chunksForFile("a.ts")).toHaveLength(3);
   });
 
+  it("pendingChunks orders by incoming degree of the symbol, then id", () => {
+    const ref = (name: string) => ({ name, kind: "call" as const, line: 1, module: null });
+    store.upsertFile(file("a.ts"), [chunk("plain", "", "a.ts", 0), chunk("one", "one", "a.ts", 1), chunk("two", "two", "a.ts", 2)]);
+    store.upsertFile(file("b.ts"), [{ ...chunk("caller", "", "b.ts", 0), refs: [ref("two"), ref("two"), ref("one")] }]);
+    expect(store.pendingChunks(10).map((c) => c.symbol)).toEqual(["two", "one", null, null]);
+    expect(store.pendingChunks(10, ["a.ts"]).map((c) => c.symbol)).toEqual(["two", "one", null]);
+  });
+
   it("filters kNN and removes vectors with replaced chunks", () => {
     const a = store.upsertFile(file("src/a.ts"), [chunk("a", "", "src/a.ts")]);
     const b = store.upsertFile(file("lib/b.py", "py"), [chunk("b", "", "lib/b.py")]);
@@ -238,6 +246,111 @@ describe("signature and touchFile", () => {
     expect(ro.getChunks([1])[0]).toMatchObject({ text: "old text", signature: null });
     expect(ro.chunksForFile("a.ts")[0]!.signature).toBeNull();
     expect(ro.pendingChunks(5)[0]!.signature).toBeNull();
+    ro.close();
+  });
+});
+
+describe("refs", () => {
+  const ref = (name: string, kind: "call" | "type" | "import", line: number, module: string | null = null) => ({ name, kind, line, module });
+
+  function seed() {
+    const a = store.upsertFile(file("src/a.ts"), [
+      { ...chunk("export function foo() {}", "foo", "src/a.ts", 0), refs: [ref("bar", "call", 5), ref("foo", "import", 1, "./x")] },
+      { ...chunk("function two() {}", "two", "src/a.ts", 1), refs: [ref("bar", "call", 12), ref("Thing", "type", 11), ref("bar", "import", 2, "./y")] },
+    ]);
+    const b = store.upsertFile(file("lib/b.py", "python"), [
+      { ...chunk("def bar(): pass", "bar", "lib/b.py", 0), refs: [ref("bar", "call", 3)] },
+    ]);
+    return { a, b };
+  }
+
+  it("stores refs per chunk ordered by line", () => {
+    const { a } = seed();
+    expect(store.refsOfChunk(a.chunkIds[0]!)).toEqual([
+      { chunkId: a.chunkIds[0], name: "foo", kind: "import", line: 1, module: "./x" },
+      { chunkId: a.chunkIds[0], name: "bar", kind: "call", line: 5, module: null },
+    ]);
+    expect(store.refsOfChunk(999)).toEqual([]);
+  });
+
+  it("cascades on deleteFile and replaces on re-upsert without duplicates", () => {
+    const { a, b } = seed();
+    store.upsertFile(file("src/a.ts"), [{ ...chunk("new", "n", "src/a.ts", 0), refs: [ref("bar", "call", 2)] }]);
+    expect(store.findRefs("bar", 10).map((h) => [h.chunk.path, h.ref.line])).toEqual([
+      ["lib/b.py", 3],
+      ["src/a.ts", 2],
+    ]);
+    expect(store.refsOfChunk(a.chunkIds[0]!)).toEqual([]);
+    store.deleteFile("src/a.ts");
+    expect(store.findRefs("bar", 10)).toHaveLength(1);
+    store.deleteFile("lib/b.py");
+    expect(store.findRefs("bar", 10)).toEqual([]);
+    expect(store.refsOfChunk(b.chunkIds[0]!)).toEqual([]);
+  });
+
+  it("findDefinitions matches chunks.symbol with filter", () => {
+    seed();
+    store.upsertFile(file("src/c.ts"), [chunk("function bar() {}", "bar", "src/c.ts", 0)]);
+    expect(store.findDefinitions("bar").map((c) => c.path)).toEqual(["lib/b.py", "src/c.ts"]);
+    expect(store.findDefinitions("bar", { lang: "ts" }).map((c) => c.path)).toEqual(["src/c.ts"]);
+    expect(store.findDefinitions("bar", { pathPrefix: "lib/" }).map((c) => c.path)).toEqual(["lib/b.py"]);
+    expect(store.findDefinitions("nope")).toEqual([]);
+  });
+
+  it("findRefs returns hits with chunks, honours limit and filter", () => {
+    const { a } = seed();
+    const all = store.findRefs("bar", 10);
+    expect(all.map((h) => [h.chunk.path, h.ref.kind, h.ref.line])).toEqual([
+      ["lib/b.py", "call", 3],
+      ["src/a.ts", "import", 2],
+      ["src/a.ts", "call", 5],
+      ["src/a.ts", "call", 12],
+    ]);
+    expect(all[1]!.chunk.id).toBe(a.chunkIds[1]);
+    expect(store.findRefs("bar", 2)).toHaveLength(2);
+    expect(store.findRefs("bar", 0)).toEqual([]);
+    expect(store.findRefs("bar", 10, { lang: "python" }).map((h) => h.chunk.path)).toEqual(["lib/b.py"]);
+    expect(store.findRefs("bar", 10, { pathPrefix: "src/" })).toHaveLength(3);
+  });
+
+  it("importsOfFile returns only imports with module", () => {
+    const { a, b } = seed();
+    expect(store.importsOfFile(a.fileId).map((r) => [r.name, r.module, r.line])).toEqual([
+      ["foo", "./x", 1],
+      ["bar", "./y", 2],
+    ]);
+    expect(store.importsOfFile(b.fileId)).toEqual([]);
+  });
+
+  it("uses refs_name and chunks_symbol indexes", () => {
+    seed();
+    store.close();
+    const db = openDatabase(dbPath, true);
+    const plan = (sql: string) =>
+      db
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all("bar")
+        .map((r) => String(r.detail))
+        .join("\n");
+    expect(plan("SELECT * FROM refs r JOIN chunks c ON c.id = r.chunk_id JOIN files f ON f.id = c.file_id WHERE r.name = ? ORDER BY f.path, r.line")).toContain("refs_name");
+    expect(plan("SELECT * FROM chunks c JOIN files f ON f.id = c.file_id WHERE c.symbol = ? ORDER BY f.path, c.start_line")).toContain("chunks_symbol");
+    db.close();
+  });
+
+  it("read-only store on an index without refs returns []", () => {
+    const old = join(dir, "old.db");
+    const db = openDatabase(old, false);
+    db.exec(`
+      CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, lang TEXT, size INTEGER NOT NULL, mtime REAL NOT NULL, content_hash TEXT NOT NULL, indexed_at INTEGER NOT NULL);
+      CREATE TABLE chunks (id INTEGER PRIMARY KEY, file_id INTEGER NOT NULL, start_line INTEGER NOT NULL, end_line INTEGER NOT NULL, start_byte INTEGER NOT NULL, end_byte INTEGER NOT NULL, kind TEXT NOT NULL, symbol TEXT, parent_symbol TEXT, chunk_hash TEXT NOT NULL, text TEXT NOT NULL, embedded INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    `);
+    db.close();
+    const ro = openIndexStore(old, { readonly: true });
+    expect(ro.findDefinitions("a")).toEqual([]);
+    expect(ro.findRefs("a", 5)).toEqual([]);
+    expect(ro.refsOfChunk(1)).toEqual([]);
+    expect(ro.importsOfFile(1)).toEqual([]);
     ro.close();
   });
 });

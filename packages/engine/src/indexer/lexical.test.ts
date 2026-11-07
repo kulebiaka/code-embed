@@ -8,7 +8,8 @@ import { openIndexStore } from "../store/sqlite";
 import type { IndexStore } from "../store/types";
 import { initHashing } from "../util/hash";
 import * as scanRead from "../scan/read";
-import { applyChanges, runLexical } from "./lexical";
+import type { Chunk, Ref } from "../chunk/types";
+import { applyChanges, bindRefs, runLexical } from "./lexical";
 import type { IndexerContext } from "./types";
 
 const testSettings: EffectiveSettings = {
@@ -200,5 +201,95 @@ describe("applyChanges", () => {
     expect(store.getFile("b.ts")).toBeUndefined();
     expect(store.getFile("c.ts")).toBeDefined();
     expect(store.chunksForFile("a.ts")[0]?.text).toContain("333");
+  });
+});
+
+function chunk(startByte: number, endByte: number): Chunk {
+  return { startLine: 1, endLine: 1, startByte, endByte, kind: "function", symbol: null, parentSymbol: null, signature: null, text: "" };
+}
+
+function ref(byte: number, name = "f"): Ref {
+  return { name, kind: "call", line: 1, byte };
+}
+
+describe("bindRefs", () => {
+  it("binds a ref to the chunk whose range contains it, end exclusive", () => {
+    const out = bindRefs([chunk(0, 10), chunk(10, 20)], [ref(0), ref(9), ref(10)]);
+    expect(out[0]!.length).toBe(2);
+    expect(out[1]!.length).toBe(1);
+    expect(out[0]![0]).toEqual({ name: "f", kind: "call", line: 1, module: null });
+  });
+
+  it("keeps the import module", () => {
+    const out = bindRefs([chunk(0, 10)], [{ name: "x", kind: "import", line: 1, byte: 3, module: "./x" }]);
+    expect(out[0]![0]!.module).toBe("./x");
+  });
+
+  it("binds a ref outside every chunk to the nearest chunk, first on ties", () => {
+    const chunks = [chunk(10, 20), chunk(40, 50)];
+    expect(bindRefs(chunks, [ref(2)]).map((r) => r.length)).toEqual([1, 0]);
+    expect(bindRefs(chunks, [ref(22)]).map((r) => r.length)).toEqual([1, 0]);
+    expect(bindRefs(chunks, [ref(35)]).map((r) => r.length)).toEqual([0, 1]);
+    expect(bindRefs(chunks, [ref(60)]).map((r) => r.length)).toEqual([0, 1]);
+    expect(bindRefs([chunk(10, 20), chunk(30, 40)], [ref(25)]).map((r) => r.length)).toEqual([0, 1]);
+    expect(bindRefs([chunk(10, 20), chunk(31, 40)], [ref(25)]).map((r) => r.length)).toEqual([1, 0]);
+  });
+
+  it("takes the narrowest chunk for overlapping ranges and stores the ref once", () => {
+    const out = bindRefs([chunk(0, 100), chunk(80, 150)], [ref(90)]);
+    expect(out.flat().length).toBe(1);
+    expect(out[1]!.length).toBe(1);
+    expect(bindRefs([chunk(0, 100), chunk(80, 190)], [ref(90)])[0]!.length).toBe(1);
+  });
+
+  it("binds to a nested method rather than the enclosing skeleton", () => {
+    const out = bindRefs([chunk(0, 200), chunk(50, 80)], [ref(60), ref(10)]);
+    expect(out[0]!.length).toBe(1);
+    expect(out[1]!.length).toBe(1);
+  });
+
+  it("picks the first of equal ranges", () => {
+    const out = bindRefs([chunk(0, 50), chunk(0, 50)], [ref(5)]);
+    expect(out.map((r) => r.length)).toEqual([1, 0]);
+  });
+
+  it("returns nothing for a file without chunks", () => {
+    expect(bindRefs([], [ref(5)])).toEqual([]);
+  });
+});
+
+describe("runLexical refs", () => {
+  it("stores refs and imports, putting a method call in the method chunk", async () => {
+    const methods = Array.from(
+      { length: 40 },
+      (_, i) => `  method${i}(a: number, b: number): number {\n    const total = a + b + ${i};\n    return total * ${i + 2};\n  }\n`,
+    ).join("\n");
+    write(
+      "src/big.ts",
+      `import { helperFn } from "./helper";\n\nexport class Big {\n${methods}\n  special(): number {\n    return helperFn(1);\n  }\n}\n`,
+    );
+    write("src/helper.ts", "export function helperFn(n: number) {\n  return n;\n}\n");
+    write("src/empty.ts", "");
+    await runLexical(ctx());
+
+    const big = store.getFile("src/big.ts")!;
+    const imports = store.importsOfFile(big.id);
+    expect(imports.map((r) => r.name)).toContain("helperFn");
+
+    const chunks = store.chunksForFile("src/big.ts");
+    const holders = chunks.filter((c) =>
+      store.refsOfChunk(c.id).some((r) => r.name === "helperFn" && r.kind === "call"),
+    );
+    expect(holders.length).toBe(1);
+    expect(holders[0]!.symbol).toBe("special");
+    expect(holders[0]!.text).toContain("return helperFn(1)");
+    expect(store.findRefs("helperFn", 10).length).toBeGreaterThan(0);
+  });
+
+  it("indexes a file without chunks without error", async () => {
+    write("src/empty.ts", "");
+    const r = await runLexical(ctx());
+    expect(r.changed).toBeGreaterThanOrEqual(0);
+    expect(store.findRefs("anything", 10)).toEqual([]);
   });
 });

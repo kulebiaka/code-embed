@@ -23,8 +23,8 @@ beforeAll(() => {
     `export function renderGiraffeTemplate(name: string) {\n  return "giraffe " + name;\n}\n${lines(5)}\n`,
   );
   const queries: EvalQuery[] = [
-    { id: "q1", repo: "mini", query: "parseZebraConfiguration", lang: "en", expected: [{ path: "src/alpha.ts", startLine: 1, endLine: 3 }] },
-    { id: "q2", repo: "mini", query: "renderGiraffeTemplate", lang: "ru", expected: [{ path: "src/beta.ts", startLine: 1, endLine: 3 }] },
+    { id: "q1", repo: "mini", query: "parseZebraConfiguration", lang: "en", expected: [{ path: "src/alpha.ts", startLine: 1, endLine: 3 }], context: { path: "src/beta.ts", line: 1, expected: [{ path: "src/beta.ts", symbol: "renderGiraffeTemplate" }] } },
+    { id: "q2", repo: "mini", query: "renderGiraffeTemplate", lang: "ru", expected: [{ path: "src/beta.ts", startLine: 1, endLine: 3 }], context: { path: "src/alpha.ts", line: 1, expected: [{ path: "src/alpha.ts", symbol: "parseZebraConfiguration" }, { path: "src/alpha.ts", symbol: "missingSymbol" }] } },
     { id: "q3", repo: "mini", query: "unused", lang: "en", expected: [{ path: "src/alpha.ts", startLine: 1, endLine: 3 }] },
   ];
   mkdirSync(path.join(dir, "datasets"));
@@ -54,6 +54,19 @@ describe("runEval", () => {
     expect(lexical?.perRepo.mini?.count).toBe(2);
     expect(lexical?.chunksPerSec).toBeGreaterThan(0);
     expect(result.nr10).not.toBeNull();
+  });
+
+  it("computes context recall once per repo from path:line, not from the query", async () => {
+    const result = await runEval({
+      model: "fake",
+      modes: ["lexical", "hybrid"],
+      repos: [repo],
+      reposDir: path.join(dir, "repos"),
+      datasetsDir: path.join(dir, "datasets"),
+      limit: 2,
+      fake: true,
+    });
+    for (const r of result.reports) expect(r.contextRecall).toEqual({ count: 2, recall: 0.75 });
   });
 
   it("fails clearly when the clone is missing", async () => {

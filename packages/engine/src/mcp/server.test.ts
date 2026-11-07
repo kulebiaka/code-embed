@@ -59,10 +59,10 @@ afterEach(async () => {
 });
 
 describe("MCP server", () => {
-  it("lists search and find_similar", async () => {
+  it("lists all five tools", async () => {
     const client = await connect(makeRepo());
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(["find_similar", "search"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["context", "find_similar", "outline", "references", "search"]);
     const search = tools.find((t) => t.name === "search")!;
     expect(search.inputSchema.required).toEqual(["query"]);
     expect(Object.keys(search.inputSchema.properties ?? {})).toEqual(
@@ -102,6 +102,31 @@ describe("MCP server", () => {
     const client = await connect(root);
     const res = await client.callTool({ name: "find_similar", arguments: { code: "x", path: "a.ts" } });
     expect(res.isError).toBe(true);
+  });
+
+  it("outline returns formatted text", async () => {
+    const root = makeRepo();
+    await indexRepo(root);
+    const client = await connect(root);
+    const outline = await client.callTool({ name: "outline", arguments: { path: "src/payment/refund.ts" } });
+    expect(outline.isError).toBeFalsy();
+    expect(text(outline)).toContain("PaymentService");
+  });
+
+  it("rejects invalid graph tool input with the ToolInputError message", async () => {
+    const root = makeRepo();
+    await indexRepo(root);
+    const client = await connect(root);
+    const mixed = await client.callTool({ name: "context", arguments: { query: "x", path: "a.ts", line: 1 } });
+    expect(mixed.isError).toBe(true);
+    expect(text(mixed)).toContain('either "query" or "path"');
+    const noSymbol = await client.callTool({ name: "references", arguments: { path: "a.ts" } });
+    expect(noSymbol.isError).toBe(true);
+    const none = await client.callTool({ name: "context", arguments: {} });
+    expect(none.isError).toBe(true);
+    const budget = await client.callTool({ name: "context", arguments: { query: "x", budget_tokens: 0 } });
+    expect(budget.isError).toBe(true);
+    expect(text(budget)).toContain("budget_tokens");
   });
 
   it("reports a hint and does not index when there is no index", async () => {

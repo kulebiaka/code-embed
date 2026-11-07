@@ -7,7 +7,8 @@ import { detectLang } from "../scan/lang";
 import { readCandidate } from "../scan/read";
 import { createIgnoreMatcher, scanFiles } from "../scan/scan";
 import type { ScannedFile } from "../scan/types";
-import type { ChunkInput, FileInput } from "../store/types";
+import type { Chunk, Ref } from "../chunk/types";
+import type { ChunkInput, FileInput, RefInput } from "../store/types";
 import type { IndexerContext, LexicalRunResult, PathChanges } from "./types";
 
 const BATCH_FILES = 50;
@@ -15,6 +16,36 @@ const BATCH_FILES = 50;
 interface Prepared {
   file: FileInput;
   chunks: ChunkInput[];
+}
+
+export function bindRefs(chunks: Chunk[], refs: Ref[]): RefInput[][] {
+  const bound: RefInput[][] = chunks.map(() => []);
+  if (chunks.length === 0) return bound;
+  for (const r of refs) {
+    let best = -1;
+    let bestWidth = Infinity;
+    for (let i = 0; i < chunks.length; i++) {
+      const c = chunks[i]!;
+      const width = c.endByte - c.startByte;
+      if (c.startByte <= r.byte && r.byte < c.endByte && width < bestWidth) {
+        best = i;
+        bestWidth = width;
+      }
+    }
+    if (best < 0) {
+      let bestDist = Infinity;
+      for (let i = 0; i < chunks.length; i++) {
+        const c = chunks[i]!;
+        const dist = r.byte < c.startByte ? c.startByte - r.byte : r.byte - c.endByte + 1;
+        if (dist < bestDist) {
+          best = i;
+          bestDist = dist;
+        }
+      }
+    }
+    bound[best]!.push({ name: r.name, kind: r.kind, line: r.line, module: r.module ?? null });
+  }
+  return bound;
 }
 
 async function prepare(
@@ -26,10 +57,11 @@ async function prepare(
   const read = await readCandidate(file);
   if ("skip" in read) return "skip";
   if (!force && read.hash === existingHash) return "unchanged";
-  const chunks = await chunkFile(file.path, file.lang, read.content, ctx.chunkOptions);
+  const { chunks, refs } = await chunkFile(file.path, file.lang, read.content, ctx.chunkOptions);
   const pathFts = tokenizeForFts(file.path);
+  const boundRefs = bindRefs(chunks, refs);
   const inputs: ChunkInput[] = [];
-  for (const c of chunks) {
+  for (const [i, c] of chunks.entries()) {
     inputs.push({
       startLine: c.startLine,
       endLine: c.endLine,
@@ -41,6 +73,7 @@ async function prepare(
       signature: c.signature,
       chunkHash: await chunkHash(c.text),
       text: c.text,
+      refs: boundRefs[i]!,
       fts: { text: tokenizeForFts(c.text), symbol: tokenizeForFts(c.symbol ?? ""), path: pathFts },
     });
   }

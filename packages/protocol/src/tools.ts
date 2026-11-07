@@ -1,6 +1,12 @@
 import type { SearchMode } from "./rpc";
 
-export const TOOL_NAMES = { search: "search", findSimilar: "find_similar" } as const;
+export const TOOL_NAMES = {
+  search: "search",
+  findSimilar: "find_similar",
+  outline: "outline",
+  references: "references",
+  context: "context",
+} as const;
 export const MAX_TOOL_TOP = 50;
 
 export interface SearchToolInput {
@@ -15,6 +21,19 @@ export interface SearchToolInput {
 export type FindSimilarToolInput =
   | { path: string; start_line: number; end_line: number; top?: number }
   | { code: string; lang?: string; top?: number };
+
+export interface OutlineToolInput {
+  path: string;
+}
+
+export interface ReferencesToolInput {
+  symbol: string;
+  path?: string;
+}
+
+export type ContextToolInput =
+  | { path: string; line: number; budget_tokens?: number }
+  | { query: string; budget_tokens?: number };
 
 const topSchema = {
   type: "integer",
@@ -100,13 +119,82 @@ export const findSimilarToolInputSchema: Record<string, unknown> = {
   additionalProperties: false,
 };
 
+export const outlineToolInputSchema: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      minLength: 1,
+      description: "File path relative to the workspace root.",
+    },
+  },
+  required: ["path"],
+  additionalProperties: false,
+};
+
+export const referencesToolInputSchema: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    symbol: {
+      type: "string",
+      minLength: 1,
+      description: "Symbol name to look up, e.g. \"processRefund\" or \"PaymentService\".",
+    },
+    path: {
+      type: "string",
+      minLength: 1,
+      description: "File path relative to the workspace root; restricts definitions to this file.",
+    },
+  },
+  required: ["symbol"],
+  additionalProperties: false,
+};
+
+export const contextToolInputSchema: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      minLength: 1,
+      description: "File path relative to the workspace root (use together with line).",
+    },
+    line: {
+      type: "integer",
+      minimum: 1,
+      description: "Line inside the target code, 1-based.",
+    },
+    query: {
+      type: "string",
+      minLength: 1,
+      description: "Natural-language description or symbol name of the target (use instead of path/line).",
+    },
+    budget_tokens: {
+      type: "integer",
+      minimum: 1,
+      description: "Token budget for the whole answer (default 4000).",
+    },
+  },
+  oneOf: [
+    {
+      required: ["path", "line"],
+      not: { required: ["query"] },
+    },
+    {
+      required: ["query"],
+      not: { anyOf: [{ required: ["path"] }, { required: ["line"] }] },
+    },
+  ],
+  additionalProperties: false,
+};
+
 export const SEARCH_TOOL_DESCRIPTION =
   "Hybrid (semantic + lexical) search over a local index of the current workspace's code. " +
   "Use it instead of grep/ripgrep when searching by meaning: questions like \"where is X handled\" or \"how does Y work\", " +
   "finding the implementation of a concept or behavior when you do not know the exact identifiers, " +
   "natural-language queries in any language (including Russian), or when grep returns nothing or too much noise. " +
-  "Do NOT use it for an exact identifier, string literal, error message or file name, or to list every usage of a symbol: " +
-  "use grep/ripgrep or file search for exact matches. " +
+  "Do NOT use it for an exact identifier, string literal, error message or file name: use grep/ripgrep or file search for exact matches. " +
+  "Do NOT use it to list the callers or usages of a symbol: use references. " +
+  "To see the surroundings of a found chunk (callees, callers, tests, related code), use context. " +
   "Returns ranked code chunks (path, line range, symbol, snippet); read the referenced lines for full context. " +
   "Narrow the search with include/exclude globs and lang when you know where to look.";
 
@@ -116,5 +204,29 @@ export const FIND_SIMILAR_TOOL_DESCRIPTION =
   "Pass either a location (path relative to the workspace root, start_line and end_line, 1-based inclusive) " +
   "or a code snippet (code, optional lang). " +
   "Use it before a refactoring or a bug fix to find other places that need the same change. " +
-  "Do NOT use it to find references, callers or usages of a symbol: use grep/ripgrep or the language server for that. " +
+  "Do NOT use it to find callers or usages of a symbol: use references. " +
+  "To see the surroundings of a fragment (callees, callers, tests), use context. " +
   "Returns ranked code chunks (path, line range, symbol, snippet).";
+
+export const OUTLINE_TOOL_DESCRIPTION =
+  "List the symbols of one file from the local index: classes, functions, methods and other declarations " +
+  "with kind, signature, parent symbol and line range, ordered by position. " +
+  "Use it to get the structure of a file without reading it whole, then read only the lines you need. " +
+  "Takes a path relative to the workspace root. Returns an empty list if the file is not indexed.";
+
+export const REFERENCES_TOOL_DESCRIPTION =
+  "Find where a symbol is defined and where it is used (calls, type references, imports) across the current workspace. " +
+  "Use it to answer \"who calls X\" or \"where is X used\" instead of grep. " +
+  "The lookup is name-based, from the local index: it matches identifiers by name and does not resolve scopes or types, " +
+  "so it is NOT a replacement for LSP (language server) find-references. " +
+  "Every item has a confidence, high or low; treat low-confidence items as candidates and verify them in the code. " +
+  "Optional path restricts definitions to one file. " +
+  "Returns definitions first, then usages (path, line range, line, kind, confidence, source line).";
+
+export const CONTEXT_TOOL_DESCRIPTION =
+  "Collect the working context of a piece of code in one call: the target chunk plus its callees, callers, tests, " +
+  "similar code and recent commits of the file, ordered by priority and cut to a token budget. " +
+  "Pass either a location (path relative to the workspace root and line, 1-based) or a query (natural language or symbol name). " +
+  "Use it before changing code to see what it depends on and what depends on it. " +
+  "Optional budget_tokens sets the size limit of the answer; the default is 4000 tokens. " +
+  "Levels that did not fit in the budget are reported as omitted.";

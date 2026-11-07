@@ -3,5 +3,5 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["src", "scripts", "stage0"]
+  "include": ["src", "scripts", "stage0", "agent"]
 }

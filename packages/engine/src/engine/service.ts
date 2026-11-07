@@ -4,6 +4,8 @@ import {
   PROTOCOL_VERSION,
   type ActivityParams,
   type ConsentGrantParams,
+  type ContextParams,
+  type ContextResponse,
   type Disposable,
   type EngineSettings,
   type FilesChangedParams,
@@ -17,10 +19,14 @@ import {
   type InitializeResult,
   type LogParams,
   type ModelListItem,
+  type OutlineParams,
+  type OutlineResponse,
   type ProviderListItem,
   type ProviderTestParams,
   type ProviderTestResult,
   type RebuildParams,
+  type ReferencesParams,
+  type ReferencesResponse,
   type SearchParams,
   type SearchResponse,
 } from "@code-embed/protocol";
@@ -47,8 +53,11 @@ import { createVectorSlot } from "../indexer/slot";
 import type { IndexerContext, PathChanges } from "../indexer/types";
 import { type VectorPhase, createVectorPhase } from "../indexer/vector";
 import { MASS_THRESHOLD, type Watcher, startWatcher } from "../indexer/watcher";
+import { buildContext } from "../search/context";
+import { findReferences } from "../search/graph";
 import { search } from "../search/hybrid";
-import { findSimilar } from "../search/similar";
+import { outline } from "../search/outline";
+import { findSimilar, normalizePath } from "../search/similar";
 import { INDEXING_EMBED_TIMEOUT_MS, type SearchContext } from "../search/types";
 import { initHashing } from "../util/hash";
 import { log, setLogSink } from "../util/log";
@@ -426,6 +435,21 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
       await catchUp();
       await ensureLexical();
       return findSimilar({ ...searchContext(), root }, p, signal);
+    },
+    async outline(p: OutlineParams, _signal?: AbortSignal): Promise<OutlineResponse> {
+      await catchUp();
+      await ensureLexical();
+      return outline(store, { ...p, path: normalizePath(root, p.path) });
+    },
+    async references(p: ReferencesParams, _signal?: AbortSignal): Promise<ReferencesResponse> {
+      await catchUp();
+      await ensureLexical();
+      return findReferences(store, p.path === undefined ? p : { ...p, path: normalizePath(root, p.path) });
+    },
+    async context(p: ContextParams, signal?: AbortSignal): Promise<ContextResponse> {
+      await catchUp();
+      await ensureLexical();
+      return buildContext({ ...searchContext(), root }, p, signal);
     },
     status,
     async rebuild(p?: RebuildParams) {

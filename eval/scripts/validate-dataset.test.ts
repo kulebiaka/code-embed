@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validateDataset } from "./validate-dataset";
 
@@ -91,5 +92,40 @@ describe("validateDataset", () => {
     const errors = validateDataset({ repos: badRepos, datasets: good, ...small }).errors.join("\n");
     expect(errors).toMatch(/commit must be a full 40-char sha/);
     expect(errors).toMatch(/license is required/);
+  });
+});
+
+describe("context field", () => {
+  const ctx = (extra: object = {}) => ({ context: { path: "src/main.txt", line: 2, expected: [{ path: "src/main.txt", symbol: "main" }], ...extra } });
+  const withExtra = (extra: object) => ({ ...good, a: good.a + q("a", 50, "en", extra) + "\n" });
+  const errorsFor = (extra: object) => validateDataset({ repos, datasets: withExtra(extra), reposDir, ...small }).errors.join("\n");
+
+  it("is optional: records without it stay valid, records with it are accepted", () => {
+    expect(validateDataset({ repos, datasets: good, reposDir, ...small }).errors).toEqual([]);
+    expect(errorsFor(ctx())).toBe("");
+  });
+
+  it("requires path+symbol pairs without line numbers", () => {
+    expect(errorsFor(ctx({ expected: [] }))).toMatch(/context.expected must be a non-empty array/);
+    expect(errorsFor(ctx({ expected: [{ path: "src/main.txt" }] }))).toMatch(/must be \{path, symbol\}/);
+    expect(errorsFor(ctx({ expected: [{ path: "src/main.txt", symbol: "main", startLine: 1 }] }))).toMatch(/only path and symbol/);
+    expect(errorsFor(ctx({ line: 0 }))).toMatch(/context must be/);
+  });
+
+  it("checks the input path and line against the clone", () => {
+    expect(errorsFor(ctx({ line: 99 }))).toMatch(/has 4 lines/);
+    expect(errorsFor(ctx({ path: "src/none.txt" }))).toMatch(/does not exist/);
+  });
+
+  it("is set on 10 records of commander and requests and nowhere else", () => {
+    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "datasets");
+    const count = (name: string) =>
+      readFileSync(path.join(dir, `${name}.jsonl`), "utf8")
+        .split("\n")
+        .filter((l) => l.trim() !== "")
+        .filter((l) => (JSON.parse(l) as { context?: unknown }).context !== undefined).length;
+    expect(count("commander")).toBe(10);
+    expect(count("requests")).toBe(10);
+    expect(count("cobra")).toBe(0);
   });
 });

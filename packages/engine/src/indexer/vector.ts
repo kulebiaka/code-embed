@@ -116,7 +116,9 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
   const nextBatch = (): ChunkRecord[] => {
     if (dirty) {
       const all = ctx.store.listFiles().map((f) => f.path);
-      order = orderPaths(all, opened, [...changed, ...(gitRecent ?? [])]);
+      const recent = [...changed, ...(gitRecent ?? [])];
+      const priority = new Set([...opened, ...recent]);
+      order = orderPaths(all, opened, recent).slice(0, all.filter((p) => priority.has(p)).length);
       cursor = 0;
       dirty = false;
     }
@@ -129,7 +131,11 @@ export function createVectorPhase(deps: VectorPhaseDeps): VectorPhase {
       if (rows.length > 0) return rows;
       cursor += GROUP;
     }
-    return [];
+    // the rest is ranked by incoming degree across the whole index, not per group
+    return ctx.store
+      .pendingChunks(batchSize + uncommitted.size)
+      .filter((c) => !uncommitted.has(c.id))
+      .slice(0, batchSize);
   };
 
   const processBatch = async (rows: ChunkRecord[]) => {

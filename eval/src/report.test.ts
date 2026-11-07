@@ -47,6 +47,45 @@ describe("renderMarkdown", () => {
   });
 });
 
+describe("context recall in the report", () => {
+  it("renders the section when recall is known", () => {
+    const reports = [{ ...rep("hybrid", 0.8), contextRecall: { count: 20, recall: 0.625 } }];
+    const md = renderMarkdown({ model: "fake", createdAt: "now", reports, nr10: null });
+    expect(md).toContain("## Context recall");
+    expect(md).toContain("| 20 | 0.625 |");
+  });
+
+  it("omits the section without context records", () => {
+    expect(renderMarkdown({ model: "fake", createdAt: "now", reports: [rep("hybrid", 0.8)], nr10: null })).not.toContain("Context recall");
+  });
+});
+
+describe("index.db size (NR-02)", () => {
+  const reports = [rep("hybrid", 0.8)];
+  const indexDb = { totalBytes: 3 * 1024 * 1024, perRepo: { cobra: 1024 * 1024, requests: 2 * 1024 * 1024 } };
+
+  it("renders per-repo and total sizes in markdown", () => {
+    const md = renderMarkdown({ model: "fake", createdAt: "now", reports, nr10: null, indexDb });
+    expect(md).toContain("## Index size (NR-02)");
+    expect(md).toContain("| cobra | 1.00 |");
+    expect(md).toContain("| total | 3.00 |");
+  });
+
+  it("omits the section when the size is unknown", () => {
+    expect(renderMarkdown({ model: "fake", createdAt: "now", reports, nr10: null })).not.toContain("NR-02");
+  });
+
+  it("keeps the size in the JSON output", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "eval-report-"));
+    try {
+      const out = writeOutputs(dir, "r", { model: "fake", createdAt: "now", reports, nr10: null, indexDb }, "md");
+      expect(JSON.parse(readFileSync(out.json, "utf8")).indexDb).toEqual(indexDb);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("bench", () => {
   it("builds rows from the hybrid report and renders errors", () => {
     const row = benchRow("fake", [rep("lexical", 0.1), rep("hybrid", 0.8)]);

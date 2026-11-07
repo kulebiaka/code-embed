@@ -12,12 +12,24 @@ export interface ExpectedChunk {
   endLine: number;
 }
 
+export interface ExpectedContextChunk {
+  path: string;
+  symbol: string;
+}
+
+export interface EvalContext {
+  path: string;
+  line: number;
+  expected: ExpectedContextChunk[];
+}
+
 export interface EvalQuery {
   id: string;
   repo: string;
   query: string;
   lang: "ru" | "en";
   expected: ExpectedChunk[];
+  context?: EvalContext;
   tags?: string[];
 }
 
@@ -25,6 +37,11 @@ export interface EvalMetrics {
   count: number;
   recallAt10: number;
   mrr: number;
+}
+
+export interface ContextMetrics {
+  count: number;
+  recall: number;
 }
 
 export type EvalMode = "lexical" | "semantic" | "hybrid";
@@ -37,6 +54,7 @@ export interface EvalReport {
   ru: EvalMetrics;
   en: EvalMetrics;
   perRepo: Record<string, EvalMetrics>;
+  contextRecall?: ContextMetrics;
   indexSeconds?: number;
   chunksPerSec?: number;
   rssMb?: number;

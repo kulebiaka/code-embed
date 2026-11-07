@@ -83,4 +83,59 @@ describe("CLI after index (R-80, R-82, R-83)", () => {
     expect(r.code).toBe(0);
     expect(parseJsonLines(r.stdout).length).toBeGreaterThan(0);
   });
+
+  it("outline prints text and JSON", async () => {
+    const text = await sb.run(["outline", "src/payment/refund.ts"]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("calculateRefundAmount");
+
+    const json = await sb.run(["outline", "src/payment/refund.ts", "--json"]);
+    expect(json.code).toBe(0);
+    const resp = JSON.parse(json.stdout);
+    expect(resp.path).toBe("src/payment/refund.ts");
+    expect(resp.symbols.map((s: { symbol: string }) => s.symbol)).toContain("calculateRefundAmount");
+  });
+
+  it("refs prints text and JSON, and --path restricts definitions", async () => {
+    const text = await sb.run(["refs", "calculateRefundAmount"]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("src/payment/refund.ts");
+
+    const json = await sb.run(["refs", "calculateRefundAmount", "--json"]);
+    expect(json.code).toBe(0);
+    const resp = JSON.parse(json.stdout);
+    expect(resp.symbol).toBe("calculateRefundAmount");
+    expect(resp.items.some((x: { role: string }) => x.role === "definition")).toBe(true);
+    expect(resp.items.some((x: { role: string; confidence: string }) => x.role === "usage" && x.confidence)).toBe(true);
+
+    const scoped = await sb.run(["refs", "calculateRefundAmount", "--path", "src/payment/refund.ts", "--json"]);
+    expect(scoped.code).toBe(0);
+    const defs = JSON.parse(scoped.stdout).items.filter((x: { role: string }) => x.role === "definition");
+    expect(defs.length).toBeGreaterThan(0);
+    expect(defs.every((x: { path: string }) => x.path === "src/payment/refund.ts")).toBe(true);
+
+    const other = await sb.run(["refs", "calculateRefundAmount", "--path", "src/App.tsx", "--json"]);
+    const otherDefs = JSON.parse(other.stdout).items.filter((x: { role: string }) => x.role === "definition");
+    expect(otherDefs).toEqual([]);
+  });
+
+  it("context prints text and JSON, and --budget caps the budget", async () => {
+    const text = await sb.run(["context", "src/payment/refund.ts:64"]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("processPaymentRefund");
+
+    const json = await sb.run(["context", "src/payment/refund.ts:64", "--json"]);
+    expect(json.code).toBe(0);
+    const resp = JSON.parse(json.stdout);
+    expect(resp.chunks[0].level).toBe("target");
+    expect(resp.budgetTokens).toBe(4000);
+
+    const budgeted = await sb.run(["context", "src/payment/refund.ts:64", "--budget", "500", "--json"]);
+    expect(budgeted.code).toBe(0);
+    expect(JSON.parse(budgeted.stdout).budgetTokens).toBe(500);
+
+    const query = await sb.run(["context", "refund payment", "--json"]);
+    expect(query.code).toBe(0);
+    expect(JSON.parse(query.stdout).chunks.length).toBeGreaterThan(0);
+  });
 });

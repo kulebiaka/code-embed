@@ -91,8 +91,16 @@ describe("local embedder", () => {
       extra: { session: { disable_prepacking: "1" } },
     });
     expect(state.fromPretrainedOpts.dtype).toBe("q8");
+    expect("device" in state.fromPretrainedOpts).toBe(false);
     expect(emb.info.modelId).toBe("local/multilingual-e5-small@384");
     expect(emb.info.maxInputTokens).toBe(512);
+  });
+
+  it("passes the execution provider device to from_pretrained", async () => {
+    await createLocalEmbedder(getModel("multilingual-e5-small"), { ...opts, device: "coreml" }).init();
+    expect(state.fromPretrainedOpts.device).toBe("coreml");
+    expect(state.fromPretrainedOpts.dtype).toBe("q8");
+    expect(state.fromPretrainedOpts.session_options.intraOpNumThreads).toBe(3);
   });
 
   it("loads plain model.onnx as fp32", async () => {

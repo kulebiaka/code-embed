@@ -7,6 +7,8 @@ import type {
   FileRecord,
   FtsHit,
   IndexStore,
+  RefHit,
+  RefRecord,
   StoreFilter,
   VecHit,
 } from "./types";
@@ -44,6 +46,16 @@ CREATE INDEX IF NOT EXISTS chunks_file ON chunks(file_id);
 CREATE INDEX IF NOT EXISTS chunks_embedded ON chunks(embedded);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, symbol, path, tokenize = 'unicode61 remove_diacritics 2');
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS refs (
+  chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  module TEXT
+);
+CREATE INDEX IF NOT EXISTS refs_name ON refs(name);
+CREATE INDEX IF NOT EXISTS refs_chunk ON refs(chunk_id);
+CREATE INDEX IF NOT EXISTS chunks_symbol ON chunks(symbol);
 `;
 
 const chunkSelect = (hasSignature: boolean): string => `SELECT c.id, c.file_id, f.path, f.lang, c.start_line, c.end_line, c.start_byte, c.end_byte,
@@ -80,6 +92,10 @@ function chunkRecord(r: Row): ChunkRecord {
     text: r.text,
     embedded: r.embedded === 1,
   };
+}
+
+function refRecord(r: Row): RefRecord {
+  return { chunkId: r.chunk_id, name: r.name, kind: r.kind, line: r.line, module: r.module ?? null };
 }
 
 function asBytes(v: Int8Array): Uint8Array {
@@ -128,15 +144,19 @@ class SqliteStore implements IndexStore {
   dims: number | null = null;
   private depth = 0;
   private hasVec: boolean;
+  private hasRefs: boolean;
   private chunkSql: string;
+  private hasSignature: boolean;
 
   constructor(
     private db: Db,
     readonly readonly: boolean,
   ) {
     const cols = db.prepare("PRAGMA table_info(chunks)").all();
-    this.chunkSql = chunkSelect(cols.some((c) => c.name === "signature"));
+    this.hasSignature = cols.some((c) => c.name === "signature");
+    this.chunkSql = chunkSelect(this.hasSignature);
     this.hasVec = !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'chunks_vec'").get();
+    this.hasRefs = !!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'refs'").get();
     const d = this.getMeta("vec_dims");
     this.dims = this.hasVec && d ? Number(d) : null;
   }
@@ -201,6 +221,7 @@ class SqliteStore implements IndexStore {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const insFts = this.db.prepare("INSERT INTO chunks_fts(rowid, text, symbol, path) VALUES (?, ?, ?, ?)");
+      const insRef = this.db.prepare("INSERT INTO refs(chunk_id, name, kind, line, module) VALUES (?, ?, ?, ?, ?)");
       const chunkIds: number[] = [];
       for (const c of chunks) {
         const res = insChunk.run(
@@ -218,6 +239,7 @@ class SqliteStore implements IndexStore {
         );
         const id = Number(res.lastInsertRowid);
         insFts.run(id, c.fts.text, c.fts.symbol, c.fts.path);
+        for (const r of c.refs ?? []) insRef.run(id, r.name, r.kind, r.line, r.module);
         chunkIds.push(id);
       }
       return { fileId, chunkIds };
@@ -252,9 +274,10 @@ class SqliteStore implements IndexStore {
 
   pendingChunks(limit: number, paths?: string[]): ChunkRecord[] {
     if (paths && paths.length === 0) return [];
+    const order = this.hasRefs ? "(SELECT COUNT(*) FROM refs r WHERE r.name = c.symbol) DESC, c.id" : "c.id";
     const pathSql = paths ? ` AND f.path IN (${placeholders(paths.length)})` : "";
     return this.db
-      .prepare(`${this.chunkSql} WHERE c.embedded = 0${pathSql} ORDER BY c.id LIMIT ?`)
+      .prepare(`${this.chunkSql} WHERE c.embedded = 0${pathSql} ORDER BY ${order} LIMIT ?`)
       .all(...(paths ?? []), limit)
       .map(chunkRecord);
   }
@@ -340,6 +363,49 @@ class SqliteStore implements IndexStore {
       }
     }
     return out;
+  }
+
+  findDefinitions(name: string, filter?: StoreFilter): ChunkRecord[] {
+    if (!this.hasRefs) return [];
+    const { sql, params } = filterSql(filter);
+    return this.db
+      .prepare(`${this.chunkSql} WHERE c.symbol = ?${sql} ORDER BY f.path, c.start_line`)
+      .all(name, ...params)
+      .map(chunkRecord);
+  }
+
+  findRefs(name: string, limit: number, filter?: StoreFilter): RefHit[] {
+    if (!this.hasRefs || limit <= 0) return [];
+    const { sql, params } = filterSql(filter);
+    const rows = this.db
+      .prepare(
+        `SELECT r.chunk_id AS r_chunk_id, r.name AS r_name, r.kind AS r_kind, r.line AS r_line, r.module AS r_module,
+           c.id, c.file_id, f.path, f.lang, c.start_line, c.end_line, c.start_byte, c.end_byte,
+           c.kind, c.symbol, c.parent_symbol, ${this.hasSignature ? "c.signature" : "NULL AS signature"}, c.chunk_hash, c.text, c.embedded
+         FROM refs r JOIN chunks c ON c.id = r.chunk_id JOIN files f ON f.id = c.file_id
+         WHERE r.name = ?${sql} ORDER BY f.path, r.line LIMIT ?`,
+      )
+      .all(name, ...params, limit);
+    return rows.map((r) => ({
+      ref: refRecord({ chunk_id: r.r_chunk_id, name: r.r_name, kind: r.r_kind, line: r.r_line, module: r.r_module }),
+      chunk: chunkRecord(r),
+    }));
+  }
+
+  refsOfChunk(chunkId: number): RefRecord[] {
+    if (!this.hasRefs) return [];
+    return this.db.prepare("SELECT * FROM refs WHERE chunk_id = ? ORDER BY line, rowid").all(chunkId).map(refRecord);
+  }
+
+  importsOfFile(fileId: number): RefRecord[] {
+    if (!this.hasRefs) return [];
+    return this.db
+      .prepare(
+        `SELECT r.* FROM refs r JOIN chunks c ON c.id = r.chunk_id
+         WHERE c.file_id = ? AND r.kind = 'import' AND r.module IS NOT NULL ORDER BY r.line, r.rowid`,
+      )
+      .all(fileId)
+      .map(refRecord);
   }
 
   counts(): { files: number; chunks: number; embedded: number } {
