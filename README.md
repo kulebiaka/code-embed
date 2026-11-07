@@ -215,8 +215,8 @@ claude mcp add code-embed -- npx -y code-embed mcp --root /path/to/project
 - Before changing code, collect what it depends on and what depends on it:
   `code-embed context <path>:<line>` (or `context`, optional `--budget` / `budget_tokens`,
   default 4000).
-- For an exact identifier, string literal, error message, file name or a list of all usages
-  of a symbol, use grep/ripgrep, not code-embed.
+- For an exact identifier, string literal, error message, or file name, use
+  grep/ripgrep, not code-embed.
 - code-embed results are ranked chunks; read the referenced lines of the file before editing.
 ```
 
