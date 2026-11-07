@@ -22,7 +22,7 @@ function overlapLines(a: { startLine: number; endLine: number }, b: { startLine:
   return Math.max(0, Math.min(a.endLine, b.endLine) - Math.max(a.startLine, b.startLine) + 1);
 }
 
-function normalizePath(root: string, raw: string): string {
+export function normalizePath(root: string, raw: string): string {
   const p = raw.replace(/\\/g, "/");
   const abs = isAbsolute(p) || /^[A-Za-z]:\//.test(p) ? resolve(p) : resolve(root, p);
   const rel = relative(root, abs);

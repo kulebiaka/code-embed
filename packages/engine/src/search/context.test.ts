@@ -98,6 +98,15 @@ describe("buildContext target", () => {
     expect(r.chunks[0]).toMatchObject({ level: "target", path: "src/a.ts", symbol: "zebraStripe" });
   });
 
+  it("accepts an absolute path inside the root, ./ and backslashes", async () => {
+    add("src/a.ts", "typescript", [chunk({ symbol: "zebraStripe", text: "function zebraStripe() {}" })]);
+    for (const path of [join(dir, "src/a.ts"), "./src/a.ts", "src\\a.ts"]) {
+      const r = await buildContext(env(), { path, line: 1 });
+      expect(r.chunks[0]).toMatchObject({ level: "target", path: "src/a.ts", symbol: "zebraStripe" });
+    }
+    await expect(buildContext(env(), { path: "../x.ts", line: 1 })).rejects.toThrow(/outside the project root/);
+  });
+
   it("returns an empty partial package without a target", async () => {
     const r = await buildContext(env(), { path: "nope.ts", line: 1 });
     expect(r.chunks).toEqual([]);
