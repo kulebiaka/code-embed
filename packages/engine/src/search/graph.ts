@@ -108,6 +108,14 @@ function resolveUsages(
   return { items: sorted.slice(0, limit), truncated: hits.length >= REF_LIMIT || sorted.length > limit };
 }
 
+function orphanUsages(store: IndexStore, symbol: string): { items: { ref: RefRecord; chunk: ChunkRecord; confidence: Confidence }[]; truncated: boolean } {
+  const hits = store.findRefs(symbol, REF_LIMIT);
+  const items = hits
+    .map(({ ref, chunk }) => ({ ref, chunk, confidence: "low" as Confidence }))
+    .sort((a, b) => cmp(a.chunk.path, b.chunk.path) || a.ref.line - b.ref.line);
+  return { items, truncated: hits.length >= REF_LIMIT };
+}
+
 export function callersOf(
   store: IndexStore,
   symbol: string,
@@ -154,7 +162,8 @@ export function findReferences(store: IndexStore, p: ReferencesParams): Referenc
     confidence: "high",
     text: d.signature ?? d.text.split("\n")[0]!,
   }));
-  const usages = resolveUsages(store, p.symbol, defs, Number.MAX_SAFE_INTEGER);
+  const usages =
+    store.findDefinitions(p.symbol).length === 0 ? orphanUsages(store, p.symbol) : resolveUsages(store, p.symbol, defs, Number.MAX_SAFE_INTEGER);
   for (const { ref, chunk, confidence } of usages.items) {
     items.push({
       role: "usage",
