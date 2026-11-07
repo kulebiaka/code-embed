@@ -6,7 +6,7 @@ import type { ChunkRecord } from "../store/types";
 import { calleesOf, callersOf } from "./graph";
 import { search } from "./hybrid";
 import { lexicalCandidates } from "./lexical";
-import { findSimilar } from "./similar";
+import { findSimilar, normalizePath } from "./similar";
 import type { SearchContext } from "./types";
 
 export interface ContextEnv extends SearchContext {
@@ -79,7 +79,7 @@ export async function buildContext(env: ContextEnv, p: ContextParams, signal?: A
     const top = (await search(env, { query: p.query, top: 1 }, signal)).results[0];
     if (top) target = chunkOf(env, top);
   } else {
-    target = narrowest(store.chunksForFile(p.path.replace(/\\/g, "/").replace(/^\.\//, "")), p.line);
+    target = narrowest(store.chunksForFile(normalizePath(env.root, p.path)), p.line);
   }
 
   if (!target) {

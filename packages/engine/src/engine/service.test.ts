@@ -100,6 +100,32 @@ describe("LocalEngine", () => {
     expect(sim.results.length).toBeGreaterThan(0);
   });
 
+  it("outline and references normalize path like find_similar", async () => {
+    const root = makeRepo();
+    const engine = await open(root);
+    await engine.initialize({ ...INIT, root });
+    await engine.ensureLexical();
+    const rel = "src/payment/refund.ts";
+    const base = await engine.outline({ path: rel });
+    expect(base.symbols.length).toBeGreaterThan(0);
+    for (const path of [join(root, rel), `./${rel}`, rel.replace(/\//g, "\\")]) {
+      const o = await engine.outline({ path });
+      expect(o.symbols).toEqual(base.symbols);
+      expect(o.path).toBe(rel);
+    }
+    const symbol = base.symbols.find((x) => x.symbol)!.symbol!;
+    const refs = await engine.references({ symbol, path: rel });
+    expect(refs.items.filter((i) => i.role === "definition").length).toBeGreaterThan(0);
+    for (const path of [join(root, rel), `./${rel}`, rel.replace(/\//g, "\\")]) {
+      expect((await engine.references({ symbol, path })).items).toEqual(refs.items);
+    }
+    const other = await engine.references({ symbol, path: join(root, "src/App.tsx") });
+    expect(other.items.filter((i) => i.role === "definition")).toEqual([]);
+    const outside = join(tmp, "elsewhere.ts");
+    await expect(engine.outline({ path: outside })).rejects.toThrow(/outside the project root/);
+    await expect(engine.references({ symbol: "x", path: "../elsewhere.ts" })).rejects.toThrow(/outside the project root/);
+  });
+
   it("rejects a mismatched protocol version", async () => {
     const root = makeRepo();
     const engine = await open(root);
