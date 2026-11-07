@@ -72,7 +72,7 @@ Lists definitions and usages (calls, type references, imports) of a symbol by na
 ```console
 $ code-embed refs processPaymentRefund --path src/payment/refund.ts
 Definitions of processPaymentRefund (1):
-  src/payment/refund.ts:64  [method, high]  in RefundService
+  src/payment/refund.ts:64  [method, high]  in processPaymentRefund
       async processPaymentRefund(request: RefundRequest): Promise<RefundResult> {
 Usages (1):
   src/api/refunds.ts:31  [call, high]  in handleRefund
@@ -92,7 +92,7 @@ The package is filled in priority order until the budget runs out: the target ch
 ```console
 $ code-embed context src/payment/refund.ts:70 --budget 2000
 ## Target
-src/payment/refund.ts:64-90  RefundService.processPaymentRefund
+src/payment/refund.ts:64-90  processPaymentRefund
     async processPaymentRefund(request: RefundRequest): Promise<RefundResult> {
       ...
 ## Callees
