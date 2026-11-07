@@ -41,7 +41,7 @@ import {
   type Phase,
   type RssPeaks,
 } from "./real-model-report";
-import { minVersionFromRange } from "./report";
+import { extensionHostExe, minVersionFromRange } from "./report";
 import { STRESS_MARKERS, copyRepoFixture, createStressFixture } from "./stress-fixture";
 
 const run = promisify(execFile);
@@ -116,14 +116,6 @@ function buildEngine(): { cli: string; tmp: string } {
   const cli = join(dest, "extension/dist/engine/cli.js");
   if (!existsSync(cli)) throw new Error(`${cli} is missing in the vsix`);
   return { cli, tmp };
-}
-
-function extensionHostExe(exe: string): string {
-  if (process.platform !== "darwin") return exe;
-  const app = exe.slice(0, exe.indexOf(".app/") + 4);
-  const helper = join(app, "Contents/Frameworks/Code Helper (Plugin).app/Contents/MacOS/Code Helper (Plugin)");
-  if (!existsSync(helper)) throw new Error(`Code Helper (Plugin) not found at ${helper}`);
-  return helper;
 }
 
 function firstTsFile(dir: string, rel = ""): string | null {

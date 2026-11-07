@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
 export type CheckStatus = "pass" | "fail" | "warn";
 
 export interface CheckResult {
@@ -60,9 +63,11 @@ export function minVersionFromRange(range: string): string {
   return m[0];
 }
 
-export function lastJsonLine(stdout: string): unknown {
-  const lines = stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("{"));
-  const last = lines[lines.length - 1];
-  if (!last) throw new Error("no JSON report in output");
-  return JSON.parse(last);
+// macOS library validation in the main Code binary rejects native modules signed by another team; extensions run in the plugin helper.
+export function extensionHostExe(exe: string): string {
+  if (process.platform !== "darwin") return exe;
+  const app = exe.slice(0, exe.indexOf(".app/") + 4);
+  const helper = join(app, "Contents/Frameworks/Code Helper (Plugin).app/Contents/MacOS/Code Helper (Plugin)");
+  if (!existsSync(helper)) throw new Error(`Code Helper (Plugin) not found at ${helper}`);
+  return helper;
 }

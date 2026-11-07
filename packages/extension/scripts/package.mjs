@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-export const TARGETS = ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"];
+export const TARGETS = ["win32-x64", "darwin-arm64", "linux-x64", "linux-arm64"];
 
 const bundled = new Set(["onnxruntime-web", "tree-sitter-wasms", "sharp"]);
 const prunePaths = {

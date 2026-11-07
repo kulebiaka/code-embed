@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregate, exitCode, lastJsonLine, minVersionFromRange, runCheck, type CheckResult } from "./report";
+import { aggregate, exitCode, minVersionFromRange, runCheck, type CheckResult } from "./report";
 
 const info = { node: "22.14.0", platform: "linux", arch: "x64" };
 const res = (name: string, required: boolean, status: CheckResult["status"]): CheckResult => ({
@@ -53,10 +53,5 @@ describe("helpers", () => {
   it("extracts the minimum version from a semver range", () => {
     expect(minVersionFromRange("^1.101.0")).toBe("1.101.0");
     expect(() => minVersionFromRange("latest")).toThrow();
-  });
-
-  it("parses the last JSON line, ignoring noise", () => {
-    expect(lastJsonLine('warn\n{"a":1}\n{"b":2}\n')).toEqual({ b: 2 });
-    expect(() => lastJsonLine("nothing")).toThrow();
   });
 });

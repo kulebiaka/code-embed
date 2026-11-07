@@ -34,8 +34,6 @@ drops to 20. Otherwise the minimum Node version from the table below is fixed.
 | Target | Node (version) | node:sqlite + vec + FTS5 | Electron min VS Code (Electron / Node) | Electron stable (Electron / Node) | onnx / watcher / tree-sitter / hash-wasm | keyring |
 | --- | --- | --- | --- | --- | --- | --- |
 | win32-x64 | | | | | | |
-| win32-arm64 | | | | | | |
-| darwin-x64 | | | | | | |
 | darwin-arm64 | | | | | | |
 | linux-x64 | | | | | | |
 | linux-arm64 | | | | | | |
@@ -120,4 +118,4 @@ Example, three projects on one machine (one shared host, the default):
 pnpm --filter @code-embed/eval exec tsx stage0/real-model.ts --projects 3
 ```
 
-CI: the `real-model` job in `native-smoke.yml` (macos-14, ubuntu-22.04, windows-2022).
+CI: the `real-model` job in `native-smoke.yml` (macos-15, ubuntu-22.04, windows-2022).
