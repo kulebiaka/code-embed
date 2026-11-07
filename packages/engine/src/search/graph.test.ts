@@ -249,3 +249,24 @@ describe("calleesOf", () => {
     expect(r.map((x) => `${x.ref.name}:${x.definition.path}:${x.confidence}`)).toEqual(["dep:src/lib.ts:high", "other:src/o.ts:low"]);
   });
 });
+
+describe("findReferences without definitions", () => {
+  it("returns usages with low confidence ordered by path and line", () => {
+    add("src/b.ts", "typescript", [chunk({ symbol: "b", text: "function b() {\n  obj.method();\n}", refs: [ref("method", "call", 2)] })]);
+    add("src/a.ts", "typescript", [
+      chunk({ symbol: "a", text: "function a() {\n  x.method();\n  y.method();\n}", refs: [ref("method", "call", 3), ref("method", "call", 2)] }),
+    ]);
+    const res = findReferences(store, { symbol: "method" });
+    expect(res.items.map((i) => [i.role, i.path, i.line, i.confidence])).toEqual([
+      ["usage", "src/a.ts", 2, "low"],
+      ["usage", "src/a.ts", 3, "low"],
+      ["usage", "src/b.ts", 2, "low"],
+    ]);
+    expect(res.truncated).toBe(false);
+  });
+
+  it("returns nothing for an unknown symbol", () => {
+    add("src/a.ts", "typescript", [chunk({ symbol: "a", text: "function a() {}" })]);
+    expect(findReferences(store, { symbol: "ghost" }).items).toEqual([]);
+  });
+});
