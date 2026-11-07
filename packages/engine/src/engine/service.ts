@@ -57,7 +57,7 @@ import { buildContext } from "../search/context";
 import { findReferences } from "../search/graph";
 import { search } from "../search/hybrid";
 import { outline } from "../search/outline";
-import { findSimilar } from "../search/similar";
+import { findSimilar, normalizePath } from "../search/similar";
 import { INDEXING_EMBED_TIMEOUT_MS, type SearchContext } from "../search/types";
 import { initHashing } from "../util/hash";
 import { log, setLogSink } from "../util/log";
@@ -439,12 +439,12 @@ export async function createLocalEngine(opts: LocalEngineOptions): Promise<Local
     async outline(p: OutlineParams, _signal?: AbortSignal): Promise<OutlineResponse> {
       await catchUp();
       await ensureLexical();
-      return outline(store, p);
+      return outline(store, { ...p, path: normalizePath(root, p.path) });
     },
     async references(p: ReferencesParams, _signal?: AbortSignal): Promise<ReferencesResponse> {
       await catchUp();
       await ensureLexical();
-      return findReferences(store, p);
+      return findReferences(store, p.path === undefined ? p : { ...p, path: normalizePath(root, p.path) });
     },
     async context(p: ContextParams, signal?: AbortSignal): Promise<ContextResponse> {
       await catchUp();
