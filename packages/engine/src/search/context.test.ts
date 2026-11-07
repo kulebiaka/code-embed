@@ -353,3 +353,35 @@ describe("buildContext language without graph", () => {
     expect(new Set(r.chunks.map((c) => c.path)).size).toBe(r.chunks.length);
   });
 });
+
+describe("buildContext level limits and caller confidence", () => {
+  it("rates a caller against the definition in the target's file", async () => {
+    add("src/a.ts", "typescript", [chunk({ symbol: "dup", text: "function dup() {\n  return 1;\n}" })]);
+    add("src/b.ts", "typescript", [chunk({ symbol: "dup", text: "function dup() {\n  return 2;\n}" })]);
+    add("src/user.ts", "typescript", [
+      chunk({
+        symbol: "use",
+        text: 'import { dup } from "./b";\nfunction use() {\n  return dup();\n}',
+        refs: [{ name: "dup", kind: "import", line: 1, module: "./b" }, call("dup", 3)],
+      }),
+    ]);
+    const res = await buildContext(env(), { path: "src/a.ts", line: 1 });
+    const caller = res.chunks.find((c) => c.level === "caller");
+    expect(caller?.symbol).toBe("use");
+    expect(caller?.confidence).toBe("low");
+    const other = await buildContext(env(), { path: "src/b.ts", line: 1 });
+    expect(other.chunks.find((c) => c.level === "caller")?.confidence).toBe("high");
+  });
+
+  it("test level takes further test chunks when callers filled with test chunks", async () => {
+    add("src/target.ts", "typescript", [chunk({ symbol: "refund", text: "function refund(o) {\n  return o.amount;\n}" })]);
+    for (const p of ["a0", "a1", "a2", "a3", "a4", "z0", "z1"]) {
+      add(`tests/${p}.test.ts`, "typescript", [
+        chunk({ symbol: `t_${p}`, text: `function t_${p}() {\n  return refund(1);\n}`, refs: [call("refund", 2)] }),
+      ]);
+    }
+    const res = await buildContext(env(), { path: "src/target.ts", line: 1 });
+    expect(res.chunks.filter((c) => c.level === "caller").map((c) => c.symbol)).toEqual(["t_a0", "t_a1", "t_a2", "t_a3", "t_a4"]);
+    expect(res.chunks.filter((c) => c.level === "test").map((c) => c.symbol)).toEqual(["t_z0", "t_z1"]);
+  });
+});

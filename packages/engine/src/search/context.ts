@@ -135,9 +135,9 @@ export async function buildContext(env: ContextEnv, p: ContextParams, signal?: A
     if (symbol) {
       const callers: Candidate[] = [];
       const picked = new Set<number>();
-      for (const r of callersOf(store, symbol, { limit: CALLER_POOL })) {
+      for (const r of callersOf(store, symbol, { limit: CALLER_POOL, definitionPath: target.path })) {
+        if (r.ref.kind !== "call" || seen.has(r.chunk.id) || picked.has(r.chunk.id)) continue;
         if (callers.length >= MAX_CALLERS) break;
-        if (r.ref.kind !== "call" || r.chunk.id === target.id || picked.has(r.chunk.id)) continue;
         picked.add(r.chunk.id);
         callers.push(candidate("caller", r.chunk, r.confidence));
       }
@@ -146,8 +146,8 @@ export async function buildContext(env: ContextEnv, p: ContextParams, signal?: A
       const tests: Candidate[] = [];
       const testSeen = new Set<number>();
       for (const h of store.findRefs(symbol, TEST_POOL)) {
+        if (!TEST_PATH.test(h.chunk.path) || seen.has(h.chunk.id) || testSeen.has(h.chunk.id)) continue;
         if (tests.length >= MAX_TESTS) break;
-        if (!TEST_PATH.test(h.chunk.path) || h.chunk.id === target.id || testSeen.has(h.chunk.id)) continue;
         testSeen.add(h.chunk.id);
         tests.push(candidate("test", h.chunk));
       }
