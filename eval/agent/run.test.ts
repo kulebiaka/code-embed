@@ -82,7 +82,16 @@ describe("claude arguments", () => {
     const args = buildClaudeArgs({ ...base, config: "A" });
     expect(args).toEqual(expect.arrayContaining(["-p", "--verbose", "--strict-mcp-config", "--mcp-config", "/tmp/mcp.json", "--model", "claude-sonnet-5-5"]));
     expect(args.slice(args.indexOf("--output-format"), args.indexOf("--output-format") + 2)).toEqual(["--output-format", "stream-json"]);
-    expect(args.at(-1)).toBe("Q?");
+    expect(args[args.indexOf("-p") + 1]).toBe("Q?");
+    expect(args.slice(args.indexOf("--tools"), args.indexOf("--tools") + 2)).toEqual(["--tools", ""]);
+  });
+
+  it("never puts the question after a variadic flag", () => {
+    for (const config of ["A", "B"] as const) {
+      const args = buildClaudeArgs({ ...base, config });
+      expect(args.indexOf("Q?")).toBe(args.indexOf("-p") + 1);
+      expect(args.at(-1)).not.toBe("Q?");
+    }
   });
 
   it("A allows only search and find_similar, B adds the new tools", () => {
@@ -105,6 +114,7 @@ describe("claude arguments", () => {
 });
 
 describe("runAgentEval and report", () => {
+  const index = async () => {};
   const tasks: AgentTask[] = [
     { id: "t1", repo: "r1", question: "Q1", category: "how-works", mustMention: ["a.ts", "foo"] },
     { id: "t2", repo: "r2", question: "Q2", category: "callers", mustMention: ["bar"] },
@@ -117,7 +127,7 @@ describe("runAgentEval and report", () => {
       return { stdout: stream.replace("lib/command.js: parse", "a.ts foo"), code: 0 };
     };
     const opts = { configs: ["A", "B"] as ("A" | "B")[], model: "m", runs: 2, engine: "/e/cli.js", repos: ["r1"] };
-    const result = await runAgentEval(opts, { spawn, reposDir: "/repos", tasks });
+    const result = await runAgentEval(opts, { spawn, index, reposDir: "/repos", tasks });
     expect(calls).toHaveLength(4);
     expect(result.configs.map((c) => c.config)).toEqual(["A", "B"]);
     expect(result.configs[0]!.tasks).toHaveLength(1);
@@ -142,8 +152,61 @@ describe("runAgentEval and report", () => {
     const spawn = async () => ({ stdout: stream, code: 0 });
     const result = await runAgentEval(
       { configs: ["A"], model: "m", runs: 1, engine: "/e/cli.js", limit: 2 },
-      { spawn, reposDir: "/repos", tasks },
+      { spawn, index, reposDir: "/repos", tasks },
     );
     expect(result.configs[0]!.tasks.map((t) => t.value.score)).toEqual([0, 0]);
+  });
+
+  it("keeps the answer text of every run", async () => {
+    const spawn = async () => ({ stdout: stream, code: 0 });
+    const result = await runAgentEval(
+      { configs: ["A"], model: "m", runs: 2, engine: "/e/cli.js", limit: 1 },
+      { spawn, index, reposDir: "/repos", tasks },
+    );
+    expect(result.configs[0]!.tasks[0]!.runs.map((r) => r.answer)).toEqual(["See lib/command.js: parse", "See lib/command.js: parse"]);
+    expect(JSON.parse(JSON.stringify(result)).configs[0].tasks[0].runs[0].answer).toBe("See lib/command.js: parse");
+  });
+
+  it("indexes every selected repo for every config before the first run", async () => {
+    const events: string[] = [];
+    const spawn = async () => {
+      events.push("spawn");
+      return { stdout: stream, code: 0 };
+    };
+    const idx = async (engine: string, cwd: string) => {
+      events.push(`index ${engine} ${cwd}`);
+    };
+    await runAgentEval(
+      { configs: ["A", "B"], model: "m", runs: 1, engine: "/e/cli.js" },
+      { spawn, index: idx, reposDir: "/repos", tasks },
+    );
+    expect(events).toEqual([
+      "index /e/cli.js /repos/r1",
+      "index /e/cli.js /repos/r2",
+      "spawn",
+      "spawn",
+      "index /e/cli.js /repos/r1",
+      "index /e/cli.js /repos/r2",
+      "spawn",
+      "spawn",
+    ]);
+  });
+
+  it("fails on a non-zero exit code", async () => {
+    const spawn = async () => ({ stdout: stream, code: 1 });
+    await expect(
+      runAgentEval({ configs: ["B"], model: "m", runs: 1, engine: "/e/cli.js" }, { spawn, index, reposDir: "/repos", tasks }),
+    ).rejects.toThrow(/config B, task t1, run 1\/1: exit code 1/);
+  });
+
+  it("fails when the stream has no result event or the result is an error", async () => {
+    const noResult = async () => ({ stdout: stream.split("\n").slice(0, 3).join("\n"), code: 0 });
+    await expect(
+      runAgentEval({ configs: ["A"], model: "m", runs: 1, engine: "/e/cli.js" }, { spawn: noResult, index, reposDir: "/repos", tasks }),
+    ).rejects.toThrow(/no result event/);
+    const isError = async () => ({ stdout: JSON.stringify({ type: "result", is_error: true, result: "boom" }), code: 0 });
+    await expect(
+      runAgentEval({ configs: ["A"], model: "m", runs: 1, engine: "/e/cli.js" }, { spawn: isError, index, reposDir: "/repos", tasks }),
+    ).rejects.toThrow(/boom/);
   });
 });
