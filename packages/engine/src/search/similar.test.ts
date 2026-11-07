@@ -131,48 +131,69 @@ describe("findSimilar", () => {
 
     describe("budget counts from request start", () => {
       const BUDGET = 400;
-      const spin = (ms: number) => {
-        const end = performance.now() + ms;
-        while (performance.now() < end);
-      };
       const code = "function processPaymentRefund(order) { return gateway.refund(order.amount); }";
+      const rangeInput = { path: "src/refund.ts", range: { startLine: 2, endLine: 2 } };
+      const run = async (input: Parameters<typeof findSimilar>[1], c: Parameters<typeof findSimilar>[0]) => {
+        const t = performance.now();
+        const p = findSimilar(c, input);
+        let settled = false;
+        void p.then(
+          () => (settled = true),
+          () => (settled = true),
+        );
+        while (!settled) {
+          await vi.runAllTimersAsync();
+          await new Promise((res) => setImmediate(res));
+        }
+        const r = await p;
+        return { r, ms: performance.now() - t };
+      };
+
+      beforeEach(async () => {
+        await build();
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+      });
+      afterEach(() => {
+        vi.useRealTimers();
+      });
 
       it("an embedding near the budget never yields a late full response", async () => {
-        await build();
         const orig = store.getChunks.bind(store);
-        vi.spyOn(store, "getChunks").mockImplementation((ids) => (spin(20), orig(ids)));
+        vi.spyOn(store, "getChunks").mockImplementation((ids) => (vi.advanceTimersByTime(20), orig(ids)));
         for (const latencyMs of [250, 340, 360, 390, 420]) {
-          const t = performance.now();
-          const r = await findSimilar(ctx({ embedder: new FakeEmbedder({ dims: DIMS, latencyMs }), embedTimeoutMs: BUDGET }), {
-            code,
-            lang: "typescript",
-          });
-          const ms = performance.now() - t;
+          const { r, ms } = await run(
+            { code, lang: "typescript" },
+            ctx({ embedder: new FakeEmbedder({ dims: DIMS, latencyMs }), embedTimeoutMs: BUDGET }),
+          );
           if (ms > BUDGET) expect(r.partialReason, `${latencyMs} ms embedding answered in ${ms} ms`).toMatch(/timed out/);
           if (latencyMs >= BUDGET - 10) expect(r.partialReason).toMatch(/timed out/);
           if (latencyMs <= 250) expect(r.results.every((x) => x.sources.join() === "semantic")).toBe(true);
+          if (latencyMs === 340) {
+            expect(ms).toBeLessThanOrEqual(BUDGET);
+            expect(r.partial).toBe(false);
+            expect(r.partialReason).toBeUndefined();
+            expect(r.results.every((x) => x.sources.join() === "semantic")).toBe(true);
+          }
+          if (latencyMs === 360 || latencyMs === 420) {
+            expect(r.partialReason).toMatch(/timed out/);
+            expect(r.results.every((x) => x.sources.join() === "lexical")).toBe(true);
+          }
         }
       });
 
       it("time spent before the embedding is charged to the budget", async () => {
-        await build();
         const orig = store.chunksForFile.bind(store);
-        vi.spyOn(store, "chunksForFile").mockImplementation((p) => (spin(150), orig(p)));
-        const t = performance.now();
-        const r = await findSimilar(ctx({ embedder: new FakeEmbedder({ dims: DIMS, latencyMs: 300 }), embedTimeoutMs: BUDGET }), {
-          path: "src/refund.ts",
-          range: { startLine: 2, endLine: 2 },
-        });
-        expect(performance.now() - t).toBeLessThan(BUDGET);
+        vi.spyOn(store, "chunksForFile").mockImplementation((p) => (vi.advanceTimersByTime(150), orig(p)));
+        const { r, ms } = await run(rangeInput, ctx({ embedder: new FakeEmbedder({ dims: DIMS, latencyMs: 300 }), embedTimeoutMs: BUDGET }));
+        expect(ms).toBeLessThan(BUDGET);
         expect(r.partialReason).toMatch(/timed out/);
         expect(r.results.every((x) => x.sources.join() === "lexical")).toBe(true);
       });
 
       it("a budget already spent skips the embedder", async () => {
-        await build();
         const orig = store.chunksForFile.bind(store);
-        vi.spyOn(store, "chunksForFile").mockImplementation((p) => (spin(60), orig(p)));
-        const r = await findSimilar(ctx({ embedTimeoutMs: 50 }), { path: "src/refund.ts", range: { startLine: 2, endLine: 2 } });
+        vi.spyOn(store, "chunksForFile").mockImplementation((p) => (vi.advanceTimersByTime(60), orig(p)));
+        const { r } = await run(rangeInput, ctx({ embedTimeoutMs: 50 }));
         expect(embedCalls).toEqual([]);
         expect(r.partialReason).toMatch(/timed out/);
       });

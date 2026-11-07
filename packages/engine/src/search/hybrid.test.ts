@@ -137,39 +137,52 @@ describe("search", () => {
 
     describe("budget counts from request start", () => {
       const BUDGET = 400;
-      const spin = (ms: number) => {
-        const end = performance.now() + ms;
-        while (performance.now() < end);
-      };
       const slowAssembly = () => {
         const orig = store.getChunks.bind(store);
-        vi.spyOn(store, "getChunks").mockImplementation((ids) => (spin(20), orig(ids)));
+        vi.spyOn(store, "getChunks").mockImplementation((ids) => (vi.advanceTimersByTime(20), orig(ids)));
+      };
+      const timed = async (latencyMs: number, mode?: "hybrid" | "semantic") => {
+        const t = performance.now();
+        const p = search(ctx({ embedder: new FakeEmbedder({ dims: DIMS, latencyMs }), embedTimeoutMs: BUDGET }), {
+          query: "refund payment order",
+          mode,
+        });
+        await vi.runAllTimersAsync();
+        const r = await p;
+        return { r, ms: performance.now() - t };
       };
 
-      it.each(["hybrid", "semantic"] as const)("%s: an embedding near the budget never yields a late full response", async (mode) => {
+      beforeEach(async () => {
         await build();
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
         slowAssembly();
+      });
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it.each(["hybrid", "semantic"] as const)("%s: an embedding near the budget never yields a late full response", async (mode) => {
         for (const latencyMs of [250, 340, 360, 390, 420]) {
-          const t = performance.now();
-          const r = await search(ctx({ embedder: new FakeEmbedder({ dims: DIMS, latencyMs }), embedTimeoutMs: BUDGET }), {
-            query: "refund payment order",
-            mode,
-          });
-          const ms = performance.now() - t;
+          const { r, ms } = await timed(latencyMs, mode);
           if (ms > BUDGET) expect(r.partialReason, `${latencyMs} ms embedding answered in ${ms} ms`).toMatch(/timed out/);
           if (latencyMs >= BUDGET) expect(r.partialReason).toMatch(/timed out/);
           if (latencyMs <= 250) expect(r.results[0]!.sources).toContain("semantic");
+          if (latencyMs === 340) {
+            expect(ms).toBeLessThanOrEqual(BUDGET);
+            expect(r.partial).toBe(false);
+            expect(r.partialReason).toBeUndefined();
+            expect(r.results[0]!.sources).toContain("semantic");
+          }
+          if (latencyMs === 360 || latencyMs === 420) {
+            expect(r.partialReason).toMatch(/timed out/);
+            expect(r.results.every((x) => x.sources.join() === "lexical")).toBe(true);
+          }
         }
       });
 
       it("an embedding that finishes just under the budget falls back to lexical", async () => {
-        await build();
-        slowAssembly();
-        const t = performance.now();
-        const r = await search(ctx({ embedder: new FakeEmbedder({ dims: DIMS, latencyMs: BUDGET - 10 }), embedTimeoutMs: BUDGET }), {
-          query: "refund payment order",
-        });
-        expect(performance.now() - t).toBeLessThan(BUDGET);
+        const { r, ms } = await timed(BUDGET - 10);
+        expect(ms).toBeLessThan(BUDGET);
         expect(r.partial).toBe(true);
         expect(r.partialReason).toMatch(/timed out/);
         expect(r.results.every((x) => x.sources.join() === "lexical")).toBe(true);
