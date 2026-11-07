@@ -201,7 +201,8 @@ describe("formatReferencesForAgent", () => {
     const usages = Array.from({ length: 50 }, (_, i) => item("usage", i + 10));
     const text = formatReferencesForAgent({ symbol: "foo", items: [item("definition", 1), ...usages], truncated: true, tookMs: 1 }, { maxTokens: 100 });
     expect(text).toMatch(/… \d+ more usages/);
-    expect(text).toContain("truncated");
+    expect(text).toContain("Usage list truncated at the store limit.");
+    expect(text).not.toContain("path");
   });
 
   it("reports nothing found", () => {
