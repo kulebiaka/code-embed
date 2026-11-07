@@ -211,7 +211,7 @@ export function formatReferencesForAgent(resp: ReferencesResponse, opts?: AgentF
   }
   const rest = usages.length - shown;
   if (rest > 0) out.push(`… ${rest} more usages`);
-  if (resp.truncated) out.push("Usage list truncated at the store limit; narrow the search with path.");
+  if (resp.truncated) out.push("Usage list truncated at the store limit.");
   return out.join("\n");
 }
 
