@@ -18,7 +18,6 @@ const SERVER = "code-embed";
 const toolId = (name: string) => `mcp__${SERVER}__${name}`;
 const CURRENT_TOOLS = ["search", "find_similar"];
 const NEW_TOOLS = ["outline", "references", "context"];
-const BUILTIN_TOOLS = ["Bash", "Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task"];
 
 const evalDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(evalDir, "..");
@@ -73,7 +72,7 @@ export function parseAgentArgs(argv: string[]): AgentOptions & { out?: string; n
 
 export function toolsFor(config: AgentConfig): { allowed: string[]; disallowed: string[] } {
   const allowed = (config === "A" ? CURRENT_TOOLS : [...CURRENT_TOOLS, ...NEW_TOOLS]).map(toolId);
-  const disallowed = [...(config === "A" ? NEW_TOOLS.map(toolId) : []), ...BUILTIN_TOOLS];
+  const disallowed = config === "A" ? NEW_TOOLS.map(toolId) : [];
   return { allowed, disallowed };
 }
 
@@ -87,6 +86,7 @@ export function buildClaudeArgs(opts: { config: AgentConfig; mcpConfigPath: stri
   const { allowed, disallowed } = toolsFor(opts.config);
   return [
     "-p",
+    opts.question,
     "--verbose",
     "--output-format",
     "stream-json",
@@ -97,9 +97,9 @@ export function buildClaudeArgs(opts: { config: AgentConfig; mcpConfigPath: stri
     opts.model,
     "--allowedTools",
     allowed.join(","),
-    "--disallowedTools",
-    disallowed.join(","),
-    opts.question,
+    "--tools",
+    "",
+    ...(disallowed.length > 0 ? ["--disallowedTools", disallowed.join(",")] : []),
   ];
 }
 
@@ -148,6 +148,22 @@ export function parseStreamJson(stdout: string, wallSeconds: number): ParsedRun 
   return { toolCalls, tokens: tokens ?? 0, seconds: seconds ?? wallSeconds, answer: answer || lastText };
 }
 
+export function streamFailure(stdout: string): string | undefined {
+  let result: Record<string, any> | undefined;
+  for (const line of stdout.split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      const ev = JSON.parse(line);
+      if (ev?.type === "result") result = ev;
+    } catch {}
+  }
+  if (!result) return "no result event in the output";
+  if (result.is_error) return `result is an error: ${typeof result.result === "string" ? result.result : (result.subtype ?? "unknown")}`;
+  return undefined;
+}
+
+export type AgentRun = RunMetrics & { answer: string };
+
 export interface SpawnResult {
   stdout: string;
   code: number | null;
@@ -169,7 +185,7 @@ export interface TaskResult {
   id: string;
   repo: string;
   category: string;
-  runs: RunMetrics[];
+  runs: AgentRun[];
   value: RunMetrics;
 }
 
@@ -186,8 +202,18 @@ export interface AgentResult {
   configs: ConfigResult[];
 }
 
+export const indexRepo: RunDeps["index"] = async (engine, cwd) => {
+  const code = await new Promise<number | null>((resolve, reject) => {
+    const child = spawn("node", [engine, "index"], { cwd, stdio: ["ignore", "inherit", "inherit"] });
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+  if (code !== 0) throw new Error(`indexing ${cwd} with ${engine} failed with exit code ${code}`);
+};
+
 export interface RunDeps {
   spawn: SpawnFn;
+  index: (engine: string, cwd: string) => Promise<void>;
   reposDir: string;
   tasks: AgentTask[];
   log?: (msg: string) => void;
@@ -203,20 +229,26 @@ export async function runAgentEval(opts: AgentOptions, deps: RunDeps): Promise<A
   const configs: ConfigResult[] = [];
   try {
     for (const config of opts.configs) {
+      for (const repo of new Set(tasks.map((t) => t.repo))) {
+        deps.log?.(`${config}: indexing ${repo}`);
+        await deps.index(opts.engine, path.join(deps.reposDir, repo));
+      }
       const results: TaskResult[] = [];
       for (const task of tasks) {
         const cwd = path.join(deps.reposDir, task.repo);
         writeFileSync(mcpConfigPath, buildMcpConfig(opts.engine, cwd));
-        const runs: RunMetrics[] = [];
+        const runs: AgentRun[] = [];
         for (let i = 1; i <= opts.runs; i++) {
           const t0 = performance.now();
           const res = await deps.spawn(
             buildClaudeArgs({ config, mcpConfigPath, model: opts.model, question: task.question }),
             cwd,
           );
+          const failure = res.code !== 0 ? `exit code ${res.code}` : streamFailure(res.stdout);
+          if (failure) throw new Error(`agent run failed: config ${config}, task ${task.id}, run ${i}/${opts.runs}: ${failure}`);
           const parsed = parseStreamJson(res.stdout, (performance.now() - t0) / 1000);
           const score = scoreAnswer(parsed.answer, task.mustMention);
-          runs.push({ toolCalls: parsed.toolCalls, tokens: parsed.tokens, seconds: parsed.seconds, score });
+          runs.push({ toolCalls: parsed.toolCalls, tokens: parsed.tokens, seconds: parsed.seconds, score, answer: parsed.answer });
           deps.log?.(`${config} ${task.id} run ${i}/${opts.runs}: tools ${parsed.toolCalls}, score ${score.toFixed(2)}`);
         }
         results.push({ id: task.id, repo: task.repo, category: task.category, runs, value: taskValue(runs) });
@@ -257,7 +289,7 @@ async function main(): Promise<void> {
   }
   const result = await runAgentEval(
     { ...opts, engine: path.resolve(repoRoot, opts.engine) },
-    { spawn: spawnClaude, reposDir, tasks, log: (m) => console.error(m) },
+    { spawn: spawnClaude, index: indexRepo, reposDir, tasks, log: (m) => console.error(m) },
   );
   const stamp = result.createdAt.replace(/[:.]/g, "-");
   const out = writeOutputs(
